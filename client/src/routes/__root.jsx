@@ -1,7 +1,6 @@
-import { createRootRouteWithContext, Link, Outlet } from '@tanstack/react-router'
-// Optional: Import devtools for a better developer experience
+import { createRootRouteWithContext, Outlet } from '@tanstack/react-router'
+import { AuthProvider } from '../context/AuthContext'
 // import { TanStackRouterDevtools } from '@tanstack/router-devtools'
-// import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 
 export const Route = createRootRouteWithContext()({
   component: RootComponent,
@@ -9,19 +8,12 @@ export const Route = createRootRouteWithContext()({
 
 function RootComponent() {
   return (
-    <>
-      <nav className="p-4 bg-white shadow-sm flex gap-4 text-sm font-medium">
-        <Link to="/" className="[&.active]:text-blue-600 hover:text-blue-500 transition-colors">
-          Home
-        </Link>
-      </nav>
+    <AuthProvider>
+      {/* Root component simply acts as the top-level container */}
+      <Outlet />
 
-      <main className="max-w-4xl mx-auto p-6">
-        <Outlet />
-      </main>
-
+      {/* Devtools can stay here if you enable them */}
       {/* <TanStackRouterDevtools /> */}
-      {/* <ReactQueryDevtools /> */}
-    </>
+    </AuthProvider>
   )
 }
