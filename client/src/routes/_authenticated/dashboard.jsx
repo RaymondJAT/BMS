@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { Wallet, FileText, Clock, Building2 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
-import StatCard from '../../components/dashboard/StatCard'
+import StatCard from '../../components/ui/StatCard'
 
 export const Route = createFileRoute('/_authenticated/dashboard')({
   component: DashboardPage,

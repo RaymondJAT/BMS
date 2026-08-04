@@ -1,4 +1,3 @@
-const { v4: uuidv4 } = require('uuid')
 const { Query, Transaction, SQLQueryBuilder } = require('../database/utilities/queries.util')
 const { Budget } = require('../database/models/Budget')
 const SQL = new SQLQueryBuilder()
@@ -22,15 +21,15 @@ const upsertBudgetBudget = async (req, res) => {
     }
     #swagger.parameters['department_id'] = {
       in: 'formData',
-      type: 'string',
+      type: 'integer',
       required: true,
-      description: 'Department ID'
+      description: 'Department ID (must reference an existing master_department record)'
     }
     #swagger.parameters['type'] = {
       in: 'formData',
       type: 'string',
       required: false,
-      description: 'Budget type e.g., INITIAL, TOP_UP, OPERATIONAL'
+      description: 'Budget type: INITIAL, TOP_UP, or OPERATIONAL'
     }
     #swagger.parameters['amount'] = {
       in: 'formData',
@@ -52,13 +51,15 @@ const upsertBudgetBudget = async (req, res) => {
     }
   */
 
-  const userId = req.userId || req.user?.id || 'SYSTEM'
+  // TEMP: no auth wired up yet — default to a placeholder test user.
+  // b_createdBy / bh_created_by are NOT NULL FKs to master_user, so this
+  // must match an existing master_user.mu_id row for inserts to succeed.
+  // Replace this fallback (and remove the TEMP comment) once auth is in.
+  const userId = req.userId || req.user?.id || 1
   const { id, department_id, type, amount, date, remarks } = req.body
 
   try {
-    // -------------------------------------------------------------
-    // 1. UPDATE / TOP-UP EXISTING BUDGET
-    // -------------------------------------------------------------
+    // update / top up existing budget
     if (id) {
       const existingQuery = SQL.model(Budget.Budget)
         .select([
@@ -76,21 +77,18 @@ const upsertBudgetBudget = async (req, res) => {
         return res.status(404).json({ message: 'Budget not found' })
       }
 
-      if (existingBudget[Budget.Budget.cols.status] === 'UNAVAILABLE') {
-        return res.status(400).json({ message: 'Cannot update an unavailable (deleted) budget' })
+      if (existingBudget[Budget.Budget.cols.status] === 'CLOSED') {
+        return res.status(400).json({ message: 'Cannot update a closed budget' })
       }
 
       const currentAmount = parseFloat(existingBudget[Budget.Budget.cols.amount] || 0)
       const addedAmount = amount !== undefined ? parseFloat(amount) : 0
       const newTotalAmount = currentAmount + addedAmount
 
-      let updateData = {}
+      const updateData = {}
       if (department_id !== undefined) updateData[Budget.Budget.cols.department_id] = department_id
       if (type !== undefined) updateData[Budget.Budget.cols.type] = type
       if (amount !== undefined) updateData[Budget.Budget.cols.amount] = newTotalAmount
-
-      if (Budget.Budget.cols.updatedAt) updateData[Budget.Budget.cols.updatedAt] = new Date()
-      if (Budget.Budget.cols.updatedBy) updateData[Budget.Budget.cols.updatedBy] = userId
 
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ message: 'No valid data provided for update' })
@@ -108,15 +106,15 @@ const upsertBudgetBudget = async (req, res) => {
         const historyQuery = SQL.model(Budget.History)
           .insert({
             [Budget.History.cols.budget_id]: id,
+            [Budget.History.cols.amount]: addedAmount,
+            [Budget.History.cols.previous_amount]: currentAmount,
+            [Budget.History.cols.new_amount]: newTotalAmount,
+            [Budget.History.cols.remarks]: remarks || null,
             [Budget.History.cols.department_id]:
               department_id || existingBudget[Budget.Budget.cols.department_id],
-            [Budget.History.cols.type]: type || 'TOP_UP',
-            [Budget.History.cols.amount]: addedAmount,
+            [Budget.History.cols.type]: type || 'CASH',
             [Budget.History.cols.date]: date || new Date(),
-            ...(Budget.History.cols.createdBy ? { [Budget.History.cols.createdBy]: userId } : {}),
-            ...(Budget.History.cols.createdAt
-              ? { [Budget.History.cols.createdAt]: new Date() }
-              : {}),
+            [Budget.History.cols.created_by]: userId,
           })
           .build()
 
@@ -126,40 +124,40 @@ const upsertBudgetBudget = async (req, res) => {
       return res.status(200).json({ message: 'Budget updated successfully' })
     }
 
-    // -------------------------------------------------------------
-    // 2. CREATE NEW BUDGET
-    // -------------------------------------------------------------
+    // create new budget
     if (!department_id || amount === undefined) {
       return res.status(400).json({ message: 'Missing required fields: department_id and amount' })
     }
 
-    const newBudgetId = uuidv4()
     const initialAmount = parseFloat(amount)
 
     const insertBudgetQuery = SQL.model(Budget.Budget)
       .insert({
-        [Budget.Budget.pk]: newBudgetId,
         [Budget.Budget.cols.department_id]: department_id,
-        [Budget.Budget.cols.type]: type || 'INITIAL',
+        [Budget.Budget.cols.type]: type || 'CASH',
         [Budget.Budget.cols.amount]: initialAmount,
         [Budget.Budget.cols.status]: 'ACTIVE',
-        ...(Budget.Budget.cols.createdBy ? { [Budget.Budget.cols.createdBy]: userId } : {}),
-        ...(Budget.Budget.cols.createdAt ? { [Budget.Budget.cols.createdAt]: new Date() } : {}),
+        [Budget.Budget.cols.createdBy]: userId,
       })
       .build()
 
-    await Query(insertBudgetQuery.sql, insertBudgetQuery.bindings)
+    // b_id is an autoincrement INTEGER — never set it manually.
+    // Read the generated id back from the insert result instead.
+    const insertResult = await Query(insertBudgetQuery.sql, insertBudgetQuery.bindings)
+    const newBudgetId = insertResult.insertId
 
     // Automatically record initial history allocation ledger entry
     const insertHistoryQuery = SQL.model(Budget.History)
       .insert({
         [Budget.History.cols.budget_id]: newBudgetId,
-        [Budget.History.cols.department_id]: department_id,
-        [Budget.History.cols.type]: type || 'INITIAL',
         [Budget.History.cols.amount]: initialAmount,
+        [Budget.History.cols.previous_amount]: 0,
+        [Budget.History.cols.new_amount]: initialAmount,
+        [Budget.History.cols.remarks]: remarks || null,
+        [Budget.History.cols.department_id]: department_id,
+        [Budget.History.cols.type]: type || 'CASH',
         [Budget.History.cols.date]: date || new Date(),
-        ...(Budget.History.cols.createdBy ? { [Budget.History.cols.createdBy]: userId } : {}),
-        ...(Budget.History.cols.createdAt ? { [Budget.History.cols.createdAt]: new Date() } : {}),
+        [Budget.History.cols.created_by]: userId,
       })
       .build()
 
@@ -192,7 +190,6 @@ const softDeleteBudget = async (req, res) => {
   */
 
   const { id } = req.params
-  const userId = req.userId || req.user?.id || 'SYSTEM'
 
   if (!id) {
     return res.status(400).json({ message: 'Budget ID is required' })
@@ -200,11 +197,8 @@ const softDeleteBudget = async (req, res) => {
 
   try {
     const updateData = {
-      [Budget.Budget.cols.status]: 'UNAVAILABLE',
+      [Budget.Budget.cols.status]: 'CLOSED',
     }
-
-    if (Budget.Budget.cols.updatedAt) updateData[Budget.Budget.cols.updatedAt] = new Date()
-    if (Budget.Budget.cols.updatedBy) updateData[Budget.Budget.cols.updatedBy] = userId
 
     const { sql, bindings } = SQL.model(Budget.Budget)
       .update(updateData)
@@ -230,17 +224,17 @@ const softDeleteBudget = async (req, res) => {
  */
 const getBudgetBudget = async (req, res) => {
   // #swagger.tags = ['Budget']
-  // #swagger.description = 'Get all Budget records (filters out UNAVAILABLE unless requested)'
+  // #swagger.description = 'Get all Budget records (filters out CLOSED unless requested)'
   /* 
-    #swagger.parameters['includeUnavailable'] = {
+    #swagger.parameters['includeClosed'] = {
       in: 'query',
       type: 'boolean',
       required: false,
-      description: 'Set to true to include soft-deleted (UNAVAILABLE) budget records'
+      description: 'Set to true to include soft-deleted (CLOSED) budget records'
     }
   */
 
-  const { includeUnavailable } = req.query
+  const { includeClosed } = req.query
 
   try {
     let queryBuilder = SQL.model(Budget.Budget).select([
@@ -252,8 +246,8 @@ const getBudgetBudget = async (req, res) => {
       Budget.Budget.cols.createdAt,
     ])
 
-    if (includeUnavailable !== 'true') {
-      queryBuilder = queryBuilder.where(Budget.Budget.cols.status, '!=', 'UNAVAILABLE')
+    if (includeClosed !== 'true') {
+      queryBuilder = queryBuilder.where(Budget.Budget.cols.status, '!=', 'CLOSED')
     }
 
     const { sql, bindings } = queryBuilder.build()
@@ -291,6 +285,9 @@ const getBudgetHistory = async (req, res) => {
       Budget.History.cols.department_id,
       Budget.History.cols.type,
       Budget.History.cols.amount,
+      Budget.History.cols.previous_amount,
+      Budget.History.cols.new_amount,
+      Budget.History.cols.remarks,
       Budget.History.cols.date,
       Budget.History.cols.createdAt,
     ])

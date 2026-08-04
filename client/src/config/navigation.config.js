@@ -54,7 +54,7 @@ export const NAVIGATION_ITEMS = [
     icon: Building2,
     children: [
       // Access: Finance, Admin (Allocating budgets per department/store)
-      { id: 'fund-allocations', title: 'Budget Allocations', to: '/funds/allocations' },
+      { id: 'fund-allocations', title: 'Budget Allocations', to: '/funds/budget' },
 
       // Access: Custodian, Finance, Admin (Managing active revolving funds/petty cash)
       { id: 'fund-revolving', title: 'Revolving Funds', to: '/funds/revolving' },
