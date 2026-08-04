@@ -2,26 +2,18 @@ import React from 'react'
 import { Menu } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 
-export default function Navbar({ onToggleSidebar, onToggleMobile, isMobile = false }) {
+export default function Navbar({ onToggleMobile }) {
   const { user, logout } = useAuth()
-
-  const handleMenuClick = () => {
-    if (isMobile) {
-      onToggleMobile?.()
-    } else {
-      onToggleSidebar?.()
-    }
-  }
 
   return (
     <header className="relative flex h-16 items-center justify-between border-b border-slate-200/80 bg-white px-4 sm:px-6 shadow-xs shrink-0 z-20">
-      {/* Menu Trigger (Handles both Mobile & Desktop) */}
+      {/* menu trigger for mobile device */}
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={handleMenuClick}
-          className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:outline-none"
-          aria-label={isMobile ? 'Open navigation menu' : 'Toggle sidebar expansion'}
+          onClick={onToggleMobile}
+          className="p-2 hover:bg-slate-100 rounded-lg text-slate-600 transition-colors cursor-pointer focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:outline-none lg:hidden"
+          aria-label="Open navigation menu"
         >
           <Menu className="h-5 w-5" />
         </button>

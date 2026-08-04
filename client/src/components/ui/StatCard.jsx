@@ -3,7 +3,7 @@ import { motion } from 'framer-motion'
 import { TrendingUp, TrendingDown, Minus } from 'lucide-react'
 
 /**
- * Reusable Stat Card for Dashboard Metrics
+ * Reusable Compact Stat Card for Dashboard & Module Metrics
  *
  * @param {string} title - Label (e.g. "Total Budget", "Requests")
  * @param {string|number} value - Main metric (e.g. "₱1,250,000", "48")
@@ -50,48 +50,50 @@ export default function StatCard({
 
   if (loading) {
     return (
-      <div className="animate-pulse rounded-2xl border border-slate-200/80 bg-white p-3.5 sm:p-5 shadow-xs">
+      <div className="animate-pulse rounded-xl border border-slate-200/80 bg-white p-3 shadow-2xs">
         <div className="flex items-center justify-between">
-          <div className="h-3.5 w-20 sm:w-24 rounded bg-slate-200" />
-          <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl bg-slate-100" />
+          <div className="h-3 w-20 rounded bg-slate-200" />
+          <div className="h-7 w-7 rounded-lg bg-slate-100" />
         </div>
-        <div className="mt-3.5 h-6 sm:h-7 w-28 sm:w-36 rounded-lg bg-slate-200" />
-        <div className="mt-2.5 h-3 w-16 sm:w-20 rounded bg-slate-100" />
+        <div className="mt-2 h-5 w-28 rounded-md bg-slate-200" />
+        <div className="mt-2 h-2.5 w-16 rounded bg-slate-100" />
       </div>
     )
   }
 
   return (
     <motion.div
-      whileHover={{ y: -2 }}
+      whileHover={{ y: -1.5 }}
       transition={{ duration: 0.15, ease: 'easeOut' }}
-      className="group relative flex flex-col justify-between overflow-hidden rounded-2xl border border-slate-200/80 bg-white p-3.5 sm:p-5 shadow-xs hover:shadow-md hover:border-slate-300 transition-all duration-200"
+      className="group relative flex flex-col justify-between overflow-hidden rounded-xl border border-slate-200/80 bg-white p-3 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all duration-200"
     >
       {/* Top Row: Title & Icon Badge */}
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs sm:text-sm font-semibold text-slate-600 truncate">{title}</span>
+      <div className="flex items-center justify-between gap-1.5">
+        <span className="text-[11px] sm:text-xs font-semibold text-slate-500 uppercase tracking-wider truncate">
+          {title}
+        </span>
 
         {Icon && (
           <div
-            className={`flex h-8 w-8 sm:h-9 sm:w-9 shrink-0 items-center justify-center rounded-xl border transition-transform duration-200 group-hover:scale-105 ${selectedVariant.badge}`}
+            className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border transition-transform duration-200 group-hover:scale-105 ${selectedVariant.badge}`}
           >
-            <Icon className="h-4 w-4 sm:h-4.5 sm:w-4.5" />
+            <Icon className="h-3.5 w-3.5" />
           </div>
         )}
       </div>
 
-      {/* Center Row: Main Metric Value */}
-      <div className="mt-2.5 sm:mt-3">
-        <div className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-tight text-slate-900 break-word">
+      {/* Center & Bottom: Main Metric Value & Trend/Subtitle */}
+      <div className="mt-1.5">
+        <div className="text-base sm:text-lg lg:text-xl font-bold tracking-tight text-slate-900 wrap-break-word">
           {value}
         </div>
 
         {/* Bottom Row: Trend Badge & Subtitle */}
         {(trend || subtitle) && (
-          <div className="mt-2 flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs">
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
             {trend && (
               <span
-                className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-bold shrink-0 ${
+                className={`inline-flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] font-bold shrink-0 ${
                   trendDirection === 'up'
                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
                     : trendDirection === 'down'
@@ -99,14 +101,18 @@ export default function StatCard({
                       : 'bg-slate-100 text-slate-600 border border-slate-200/60'
                 }`}
               >
-                {trendDirection === 'up' && <TrendingUp className="h-3 w-3" />}
-                {trendDirection === 'down' && <TrendingDown className="h-3 w-3" />}
-                {trendDirection === 'neutral' && <Minus className="h-3 w-3" />}
+                {trendDirection === 'up' && <TrendingUp className="h-2.5 w-2.5" />}
+                {trendDirection === 'down' && <TrendingDown className="h-2.5 w-2.5" />}
+                {trendDirection === 'neutral' && <Minus className="h-2.5 w-2.5" />}
                 {trend}
               </span>
             )}
 
-            {subtitle && <span className="truncate font-medium text-slate-400">{subtitle}</span>}
+            {subtitle && (
+              <span className="truncate font-medium text-slate-400 text-[10px] sm:text-[11px]">
+                {subtitle}
+              </span>
+            )}
           </div>
         )}
       </div>
