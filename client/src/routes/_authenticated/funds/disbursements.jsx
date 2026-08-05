@@ -9,15 +9,14 @@ import {
   FileSpreadsheet,
   HandCoins,
   AlertCircle,
-  CheckCircle2,
   Receipt,
   RotateCcw,
 } from 'lucide-react'
 import { createDisbursementColumns } from '../../../config/tables/disbursementColumns'
-// import CreateCashDisbursementModal from '../../../components/dashboard/disbursements/CreateCashDisbursementModal'
+import CreateCashDisbursementModal from '../../../components/dashboard/disbursement/CreateCashDisbursementModal'
 // import ViewCashDisbursementModal from '../../../components/dashboard/disbursements/ViewCashDisbursementModal'
-// import EditCashDisbursementModal from '../../../components/dashboard/disbursements/EditCashDisbursementModal'
-// import SubmitCashDisbursementModal from '../../../components/dashboard/disbursements/SubmitCashDisbursementModal'
+import EditCashDisbursementModal from '../../../components/dashboard/disbursement/EditCashDisbursementModal'
+import SubmitCashDisbursementModal from '../../../components/dashboard/disbursement/SubmitCashDisbursementModal'
 
 export const Route = createFileRoute('/_authenticated/funds/disbursements')({
   component: DisbursementsPage,
@@ -75,7 +74,7 @@ function DisbursementsPage() {
   const [selectedDisbursement, setSelectedDisbursement] = useState(null)
   const [activeModal, setActiveModal] = useState(null)
 
-  // Action Handlers
+  // Action Handlers for Table Operations
   const handleView = useCallback((row) => {
     setSelectedDisbursement(row)
     setActiveModal('view')
@@ -95,6 +94,32 @@ function DisbursementsPage() {
     setActiveModal(null)
     setSelectedDisbursement(null)
   }, [])
+
+  // CRUD Mutations
+  const handleCreateDisbursement = useCallback((newRecord) => {
+    setDisbursements((prev) => [newRecord, ...prev])
+    setIsCreateOpen(false)
+  }, [])
+
+  const handleSaveEdit = useCallback(
+    (updatedRecord) => {
+      setDisbursements((prev) =>
+        prev.map((item) => (item.id === updatedRecord.id ? updatedRecord : item)),
+      )
+      handleCloseModal()
+    },
+    [handleCloseModal],
+  )
+
+  const handleSubmitLiquidation = useCallback(
+    (liquidatedRecord) => {
+      setDisbursements((prev) =>
+        prev.map((item) => (item.id === liquidatedRecord.id ? liquidatedRecord : item)),
+      )
+      handleCloseModal()
+    },
+    [handleCloseModal],
+  )
 
   // Metrics calculation matching header density
   const metrics = useMemo(() => {
@@ -260,6 +285,41 @@ function DisbursementsPage() {
           }
         />
       </div>
+
+      {/* Modals Integration */}
+      {isCreateOpen && (
+        <CreateCashDisbursementModal
+          isOpen={isCreateOpen}
+          onClose={() => setIsCreateOpen(false)}
+          onCreate={handleCreateDisbursement}
+        />
+      )}
+
+      {/* {activeModal === 'view' && selectedDisbursement && (
+        <ViewCashDisbursementModal
+          isOpen={activeModal === 'view'}
+          onClose={handleCloseModal}
+          disbursement={selectedDisbursement}
+        />
+      )} */}
+
+      {activeModal === 'edit' && selectedDisbursement && (
+        <EditCashDisbursementModal
+          isOpen={activeModal === 'edit'}
+          onClose={handleCloseModal}
+          disbursement={selectedDisbursement}
+          onSave={handleSaveEdit}
+        />
+      )}
+
+      {activeModal === 'submit' && selectedDisbursement && (
+        <SubmitCashDisbursementModal
+          isOpen={activeModal === 'submit'}
+          onClose={handleCloseModal}
+          disbursement={selectedDisbursement}
+          onSubmit={handleSubmitLiquidation}
+        />
+      )}
     </div>
   )
 }

@@ -32,7 +32,7 @@ export function createDisbursementColumns({ onView, onEdit, onSubmit }) {
       ),
     },
     {
-      header: 'Particulars',
+      header: 'Purpose',
       accessorKey: 'particulars',
       sortable: true,
       cell: (row) => (
