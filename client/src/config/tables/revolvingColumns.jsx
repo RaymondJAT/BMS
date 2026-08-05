@@ -2,29 +2,29 @@ import React from 'react'
 import { FileCheck2, AlertCircle, CheckCircle2, Calendar, Eye, Edit3 } from 'lucide-react'
 
 /**
- * Clean, UX-focused Revolving Fund Columns Definition
+ * Professional Revolving Fund Columns Definition
+ * Preserves initial stacked layout style while clearly displaying Disbursed, Liquidated, Returned, and Unliquidated figures.
  */
 export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }) {
-  // Support both onSubmit or onLiquidate fallback naming
   const handleSubmitAction = onSubmit || onLiquidate
 
   return [
     {
-      header: 'Fund Details',
+      header: 'Fund Name & Reference',
       accessorKey: 'name',
       sortable: true,
       cell: (row) => (
         <div className="py-0.5">
           <p className="font-semibold text-slate-900 text-sm">{row.name}</p>
-          <p className="text-[11px] text-slate-400 font-mono mt-0.5">{row.id || 'N/A'}</p>
+          <p className="text-[11px] text-slate-400 font-mono mt-0.5">ID: {row.id || 'N/A'}</p>
         </div>
       ),
     },
     {
-      header: 'Cycle & Submission',
+      header: 'Reporting Period',
       accessorKey: 'startDate',
       cell: (row) => {
-        const endedDate = row.endedDate || row.reportedDate || row.submittedAt
+        const isClosed = Boolean(row.endedDate || row.reportedDate || row.submittedAt)
 
         return (
           <div className="space-y-1">
@@ -33,20 +33,20 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
               {row.startDate} – {row.endDate}
             </div>
 
-            {endedDate ? (
+            {isClosed ? (
               <div className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                Reported {endedDate}
+                Report Finalized
               </div>
             ) : (
-              <div className="text-[11px] text-slate-400 italic">Report open</div>
+              <div className="text-[11px] text-slate-400 italic">Active Cycle</div>
             )}
           </div>
         )
       },
     },
     {
-      header: 'Total Cap',
+      header: 'Allocated Capital',
       accessorKey: 'totalAvailable',
       sortable: true,
       align: 'right',
@@ -60,9 +60,13 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
             <div className="font-bold text-slate-900 text-sm">
               ₱{total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </div>
-            {added > 0 && (
+            {added > 0 ? (
               <div className="text-[10px] text-emerald-600 font-medium">
-                (+₱{added.toLocaleString(undefined, { minimumFractionDigits: 2 })} added)
+                (+₱{added.toLocaleString(undefined, { minimumFractionDigits: 2 })} replenishment)
+              </div>
+            ) : (
+              <div className="text-[10px] text-slate-400">
+                Initial: ₱{beginning.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </div>
             )}
           </div>
@@ -70,52 +74,80 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
       },
     },
     {
-      header: 'Disbursed & Liquidated',
+      header: 'Disbursements & Liquidation',
       align: 'right',
       cell: (row) => {
         const issued = parseFloat(row.issued || 0)
         const liquidated = parseFloat(row.liquidated || 0)
+        const returned = parseFloat(row.returned || row.cashReturned || 0)
         const unliquidated = parseFloat(row.unliquidated || 0)
 
         return (
           <div className="space-y-0.5">
             <div className="text-xs text-slate-700">
-              Issued:{' '}
-              <span className="font-semibold">
+              Disbursed:{' '}
+              <span className="font-semibold text-slate-900">
                 ₱{issued.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </span>
             </div>
+
+            <div className="text-[11px] text-emerald-600 font-medium">
+              Liquidated:{' '}
+              <span className="font-semibold">
+                ₱{liquidated.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+
+            {returned > 0 && (
+              <div className="text-[11px] text-blue-600 font-medium">
+                Returned:{' '}
+                <span className="font-semibold">
+                  ₱{returned.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            )}
+
             {unliquidated > 0 ? (
               <div className="text-[11px] text-amber-600 font-medium flex items-center gap-1 justify-end">
-                <AlertCircle className="w-3 h-3" />₱
-                {unliquidated.toLocaleString(undefined, { minimumFractionDigits: 2 })} unverified
+                <AlertCircle className="w-3 h-3 shrink-0" />
+                <span>
+                  ₱{unliquidated.toLocaleString(undefined, { minimumFractionDigits: 2 })}{' '}
+                  unliquidated
+                </span>
               </div>
             ) : (
-              <div className="text-[11px] text-emerald-600 font-medium">
-                ₱{liquidated.toLocaleString(undefined, { minimumFractionDigits: 2 })} cleared
-              </div>
+              <div className="text-[10px] text-slate-400">Fully Settled</div>
             )}
           </div>
         )
       },
     },
     {
-      header: 'Ending Balance',
+      header: 'Available Balance',
       accessorKey: 'balance',
       sortable: true,
       align: 'right',
       cell: (row) => {
-        const balance = parseFloat(row.endingBalance ?? row.endedBalance ?? row.balance ?? 0)
+        const balance = parseFloat(row.endingBalance ?? row.balance ?? 0)
+        const endedAmount = row.endedAmount !== undefined ? parseFloat(row.endedAmount) : null
+        const isClosed = Boolean(row.endedDate || row.status === 'Closed')
         const isLow = balance < 10000
 
         return (
           <div>
-            <span className={`text-sm font-bold ${isLow ? 'text-[#E31837]' : 'text-slate-900'}`}>
+            <span
+              className={`text-sm font-bold ${isLow && !isClosed ? 'text-[#E31837]' : 'text-slate-900'}`}
+            >
               ₱{balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </span>
-            {isLow && row.status !== 'Closed' && (
-              <div className="text-[10px] text-red-500 font-medium">Low Cash</div>
-            )}
+
+            {endedAmount !== null ? (
+              <div className="text-[10px] text-slate-500 font-medium">
+                Ended Amount: ₱{endedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              </div>
+            ) : isLow && !isClosed ? (
+              <div className="text-[10px] text-red-500 font-medium">Low Balance Threshold</div>
+            ) : null}
           </div>
         )
       },
@@ -155,7 +187,6 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
 
         return (
           <div className="flex items-center justify-center gap-1">
-            {/* 1. View Modal Trigger */}
             <button
               onClick={(e) => {
                 e.stopPropagation()
@@ -167,7 +198,6 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
               <Eye className="w-4 h-4" />
             </button>
 
-            {/* 2. Edit Modal Trigger */}
             <button
               disabled={isClosed}
               onClick={(e) => {
@@ -180,7 +210,6 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
               <Edit3 className="w-4 h-4" />
             </button>
 
-            {/* 3. Submit Report Modal Trigger */}
             <button
               disabled={isClosed}
               onClick={(e) => {

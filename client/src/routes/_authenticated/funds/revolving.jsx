@@ -11,6 +11,7 @@ import {
   HandCoins,
   AlertCircle,
   Coins,
+  CheckCircle2,
 } from 'lucide-react'
 import { createRevolvingColumns } from '../../../config/tables/revolvingColumns'
 import CreateRevolvingFundModal from '../../../components/dashboard/revolving/CreateRevolvingFundModal'
@@ -74,7 +75,7 @@ function RevolvingFundPage() {
   // Modal State Controls
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [selectedFund, setSelectedFund] = useState(null)
-  const [activeModal, setActiveModal] = useState(null) // 'view' | 'edit' | 'submit' | null
+  const [activeModal, setActiveModal] = useState(null)
 
   // Action Handlers aligned with table columns
   const handleView = useCallback((row) => {
@@ -124,11 +125,18 @@ function RevolvingFundPage() {
         const totalCap = (fund.baseCap || 0) + (fund.replenished || 0)
         acc.totalCapacity += totalCap
         acc.totalIssued += fund.issued || 0
+        acc.totalLiquidated += fund.liquidated || 0
         acc.totalUnliquidated += fund.unliquidated || 0
         acc.totalBalance += fund.balance || 0
         return acc
       },
-      { totalCapacity: 0, totalIssued: 0, totalUnliquidated: 0, totalBalance: 0 },
+      {
+        totalCapacity: 0,
+        totalIssued: 0,
+        totalLiquidated: 0,
+        totalUnliquidated: 0,
+        totalBalance: 0,
+      },
     )
   }, [funds])
 
@@ -188,9 +196,9 @@ function RevolvingFundPage() {
       </div>
 
       {/* Dynamic Summary Metrics Banner */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 shrink-0">
         <StatCard
-          title="Total Fund Capacity"
+          title="Total Capacity"
           value={formatCurrency(metrics.totalCapacity)}
           icon={Vault}
           subtitle="All active funds"
@@ -198,7 +206,7 @@ function RevolvingFundPage() {
         />
 
         <StatCard
-          title="Total Outstanding"
+          title="Disbursed"
           value={formatCurrency(metrics.totalIssued)}
           icon={HandCoins}
           subtitle="Issued advances"
@@ -206,12 +214,18 @@ function RevolvingFundPage() {
         />
 
         <StatCard
-          title="Unliquidated Advances"
+          title="Liquidated"
+          value={formatCurrency(metrics.totalLiquidated)}
+          icon={CheckCircle2}
+          subtitle="Verified with receipts"
+          variant="emerald"
+        />
+
+        <StatCard
+          title="Unliquidated"
           value={formatCurrency(metrics.totalUnliquidated)}
           icon={AlertCircle}
-          trend="Pending OR"
-          trendDirection="down"
-          subtitle="Action required"
+          subtitle="Pending receipts"
           variant="red"
         />
 
