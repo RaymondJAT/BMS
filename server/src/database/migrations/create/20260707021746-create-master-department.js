@@ -19,6 +19,10 @@ module.exports = {
         type: Sequelize.STRING(300),
         allowNull: false,
       },
+      md_description: {
+        type: Sequelize.STRING(300),
+        allowNull: true,
+      },
       md_status: {
         type: Sequelize.ENUM('ACTIVE', 'INACTIVE', 'DELETED'),
         defaultValue: 'ACTIVE',

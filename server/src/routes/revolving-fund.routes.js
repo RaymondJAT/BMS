@@ -1,5 +1,12 @@
 const express = require('express')
-const { getRevolvingFund, upsertRevolvingFund, getRevolvingFundActivity, upsertRevolvingFundActivity, getClosedRevolvingFund, upsertClosedRevolvingFund } = require('../controllers/revolving-fund.controller')
+const {
+  getRevolvingFund,
+  upsertRevolvingFund,
+  getRevolvingFundActivity,
+  upsertRevolvingFundActivity,
+  getClosedRevolvingFund,
+  upsertClosedRevolvingFund,
+} = require('../controllers/revolving-fund.controller')
 
 const revolvingFundRouter = express.Router()
 

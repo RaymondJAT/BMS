@@ -3,7 +3,7 @@ import { FileCheck2, AlertCircle, CheckCircle2, Calendar, Eye, Edit3 } from 'luc
 
 /**
  * Professional Revolving Fund Columns Definition
- * Preserves initial stacked layout style while clearly displaying Disbursed, Liquidated, Returned, and Unliquidated figures.
+ * Aligned with revolvingController backend response schema.
  */
 export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }) {
   const handleSubmitAction = onSubmit || onLiquidate
@@ -13,24 +13,38 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
       header: 'Fund Name & Reference',
       accessorKey: 'name',
       sortable: true,
-      cell: (row) => (
-        <div className="py-0.5">
-          <p className="font-semibold text-slate-900 text-sm">{row.name}</p>
-          <p className="text-[11px] text-slate-400 font-mono mt-0.5">ID: {row.id || 'N/A'}</p>
-        </div>
-      ),
+      cell: (row) => {
+        const fundName = row.name || row.fund_name || 'Unnamed Fund'
+        const fundId = row.id || row.revolving_fund_id || 'N/A'
+
+        return (
+          <div className="py-0.5">
+            <p className="font-semibold text-slate-900 text-sm">{fundName}</p>
+            <p className="text-[11px] text-slate-400 font-mono mt-0.5">ID: {fundId}</p>
+          </div>
+        )
+      },
     },
     {
       header: 'Reporting Period',
-      accessorKey: 'startDate',
+      accessorKey: 'start_date',
       cell: (row) => {
-        const isClosed = Boolean(row.endedDate || row.reportedDate || row.submittedAt)
+        const startDate = row.start_date || row.startDate || '—'
+        const endDate = row.end_date || row.endDate || '—'
+
+        const isClosed = Boolean(
+          row.ended_date ||
+          row.endedDate ||
+          row.reportedDate ||
+          row.submittedAt ||
+          String(row.status).toUpperCase() === 'CLOSED',
+        )
 
         return (
           <div className="space-y-1">
             <div className="inline-flex items-center gap-1 text-xs text-slate-600 bg-slate-50 border border-slate-200/80 px-2 py-0.5 rounded-md font-medium whitespace-nowrap">
               <Calendar className="w-3 h-3 text-slate-400" />
-              {row.startDate} – {row.endDate}
+              {startDate} – {endDate}
             </div>
 
             {isClosed ? (
@@ -47,22 +61,23 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
     },
     {
       header: 'Allocated Capital',
-      accessorKey: 'totalAvailable',
+      accessorKey: 'total_fund',
       sortable: true,
       align: 'right',
       cell: (row) => {
-        const beginning = parseFloat(row.baseCap || row.beginning || 0)
-        const added = parseFloat(row.replenished || row.added || 0)
-        const total = beginning + added
+        const beginning = parseFloat(row.beginning ?? row.baseCap ?? row.base_cap ?? 0)
+        const replenished = parseFloat(row.replenished ?? row.added ?? 0)
+        const total = parseFloat(row.total_fund ?? row.totalAvailable ?? beginning + replenished)
 
         return (
           <div>
             <div className="font-bold text-slate-900 text-sm">
               ₱{total.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </div>
-            {added > 0 ? (
+            {replenished > 0 ? (
               <div className="text-[10px] text-emerald-600 font-medium">
-                (+₱{added.toLocaleString(undefined, { minimumFractionDigits: 2 })} replenishment)
+                (+₱{replenished.toLocaleString(undefined, { minimumFractionDigits: 2 })}{' '}
+                replenishment)
               </div>
             ) : (
               <div className="text-[10px] text-slate-400">
@@ -128,16 +143,18 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
       sortable: true,
       align: 'right',
       cell: (row) => {
-        const balance = parseFloat(row.endingBalance ?? row.balance ?? 0)
-        const endedAmount = row.endedAmount !== undefined ? parseFloat(row.endedAmount) : null
-        const isClosed = Boolean(row.endedDate || row.status === 'Closed')
-        const isLow = balance < 10000
+        const balance = parseFloat(row.balance ?? row.endingBalance ?? 0)
+        const rawEnded = row.ended_amount ?? row.endedAmount
+        const endedAmount =
+          rawEnded !== undefined && rawEnded !== null ? parseFloat(rawEnded) : null
+
+        const rawStatus = String(row.status || '').toUpperCase()
+        const isClosed = rawStatus === 'CLOSED' || Boolean(row.ended_date || row.endedDate)
+        const isLow = balance < 10000 && !isClosed
 
         return (
           <div>
-            <span
-              className={`text-sm font-bold ${isLow && !isClosed ? 'text-[#E31837]' : 'text-slate-900'}`}
-            >
+            <span className={`text-sm font-bold ${isLow ? 'text-[#E31837]' : 'text-slate-900'}`}>
               ₱{balance.toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </span>
 
@@ -145,7 +162,7 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
               <div className="text-[10px] text-slate-500 font-medium">
                 Ended Amount: ₱{endedAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </div>
-            ) : isLow && !isClosed ? (
+            ) : isLow ? (
               <div className="text-[10px] text-red-500 font-medium">Low Balance Threshold</div>
             ) : null}
           </div>
@@ -157,23 +174,36 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
       accessorKey: 'status',
       align: 'center',
       cell: (row) => {
-        const isSubmitted = Boolean(row.endedDate || row.reportedDate || row.submittedAt)
-        const status = isSubmitted ? 'Reported' : row.status || 'Active'
+        const isSubmitted = Boolean(
+          row.ended_date || row.endedDate || row.reportedDate || row.submittedAt,
+        )
+
+        const rawStatus = String(row.status || '').trim()
+        let displayStatus = rawStatus
+
+        if (!rawStatus) {
+          displayStatus = isSubmitted ? 'Reported' : 'Active'
+        } else if (rawStatus.toUpperCase() === 'OPEN') {
+          displayStatus = 'Active'
+        }
+
+        const statusKey = displayStatus.toLowerCase()
 
         const statusStyles = {
-          Active: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-          Reported: 'bg-blue-50 text-blue-700 border-blue-200',
-          Closed: 'bg-slate-100 text-slate-600 border-slate-200',
-          'Low Balance': 'bg-amber-50 text-amber-700 border-amber-200',
+          active: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+          open: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+          reported: 'bg-blue-50 text-blue-700 border-blue-200',
+          closed: 'bg-slate-100 text-slate-600 border-slate-200',
+          'low balance': 'bg-amber-50 text-amber-700 border-amber-200',
         }
 
         return (
           <span
             className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
-              statusStyles[status] || statusStyles.Closed
+              statusStyles[statusKey] || statusStyles.closed
             }`}
           >
-            {status}
+            {displayStatus}
           </span>
         )
       },
@@ -183,11 +213,13 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
       align: 'center',
       width: 'w-24',
       cell: (row) => {
-        const isClosed = row.status === 'Closed' || Boolean(row.endedDate)
+        const isClosed =
+          String(row.status).toUpperCase() === 'CLOSED' || Boolean(row.ended_date || row.endedDate)
 
         return (
           <div className="flex items-center justify-center gap-1">
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation()
                 onView?.(row, e)
@@ -199,6 +231,7 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
             </button>
 
             <button
+              type="button"
               disabled={isClosed}
               onClick={(e) => {
                 e.stopPropagation()
@@ -211,6 +244,7 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
             </button>
 
             <button
+              type="button"
               disabled={isClosed}
               onClick={(e) => {
                 e.stopPropagation()

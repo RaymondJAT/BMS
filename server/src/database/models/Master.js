@@ -24,6 +24,7 @@
  * @property {'md_id'} id
  * @property {'md_code'} code
  * @property {'md_name'} name
+ * @property {'md_description'} description
  * @property {'md_status'} status
  * @property {'md_createdAt'} createdAt
  */
@@ -142,11 +143,12 @@ const Master = {
       id: 'md_id',
       code: 'md_code',
       name: 'md_name',
+      description: 'md_description',
       status: 'md_status',
       createdAt: 'md_createdAt',
     },
-    select: ['md_id', 'md_code', 'md_name', 'md_status', 'md_createdAt'],
-    insert: ['md_code', 'md_name', 'md_status'],
+    select: ['md_id', 'md_code', 'md_name', 'md_description', 'md_status', 'md_createdAt'],
+    insert: ['md_code', 'md_name', 'md_description', 'md_status'],
   },
   Employee: {
     table: 'master_employee',

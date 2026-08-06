@@ -1,26 +1,46 @@
-import React, { useState, useMemo } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { Modal } from '../../ui/Modal'
 import { Send, AlertTriangle, CheckCircle2, TrendingDown, TrendingUp } from 'lucide-react'
 
+const getLocalTodayDate = () => {
+  const d = new Date()
+  const offset = d.getTimezoneOffset()
+  const localDate = new Date(d.getTime() - offset * 60 * 1000)
+  return localDate.toISOString().split('T')[0]
+}
+
 export default function SubmitRevolvingFundModal({ fund, isOpen, onClose, onSubmitReport }) {
-  const [reportedDate, setReportedDate] = useState('2026-08-04')
+  const [reportedDate, setReportedDate] = useState(getLocalTodayDate)
   const [actualCountInput, setActualCountInput] = useState('')
+  const [remarks, setRemarks] = useState('')
 
-  // 1. Calculate Fund Financial Breakdown (Safely handled if fund is null/undefined)
-  const beginningAmount = parseFloat(fund?.baseCap || fund?.beginning || 0)
-  const addedAmount = parseFloat(fund?.replenished || fund?.added || 0)
-  const returnedAmount = parseFloat(fund?.returned || 0)
-  const expendedAmount = parseFloat(fund?.expended || fund?.liquidated || 0)
+  // Reset state when modal opens or fund changes
+  useEffect(() => {
+    if (isOpen) {
+      setReportedDate(getLocalTodayDate())
+      setActualCountInput('')
+      setRemarks('')
+    }
+  }, [isOpen, fund])
 
-  // Ending Amount = Beginning + Added + Returned - Expended (or fallback to fund.balance)
+  // 1. Calculate Fund Financial Breakdown
+  const beginningAmount = parseFloat(fund?.beginning ?? fund?.baseCap ?? fund?.base_cap ?? 0)
+  const addedAmount = parseFloat(fund?.replenished ?? fund?.added ?? 0)
+  const returnedAmount = parseFloat(
+    fund?.returned ?? fund?.cashReturned ?? fund?.cash_returned ?? 0,
+  )
+  const expendedAmount = parseFloat(fund?.expended ?? fund?.liquidated ?? fund?.issued ?? 0)
+
+  // Ending Amount = Beginning + Added + Returned - Expended (or fallback to balance)
   const expectedEndingBalance = useMemo(() => {
     if (!fund) return 0
-    return fund.balance !== undefined
-      ? parseFloat(fund.balance)
+    const rawBalance = fund.balance ?? fund.endingBalance ?? fund.ending_balance
+    return rawBalance !== undefined && rawBalance !== null
+      ? parseFloat(rawBalance)
       : beginningAmount + addedAmount + returnedAmount - expendedAmount
   }, [fund, beginningAmount, addedAmount, returnedAmount, expendedAmount])
 
-  // 2. Physical Cash / Digital Wallet Variance Calculations
+  // 2. Reconciliation & Variance Calculations
   const actualCount = parseFloat(actualCountInput) || 0
   const variance = actualCount - expectedEndingBalance
 
@@ -30,32 +50,51 @@ export default function SubmitRevolvingFundModal({ fund, isOpen, onClose, onSubm
     return variance < 0 ? 'SHORT' : 'OVER'
   }, [actualCountInput, variance])
 
-  // --- EARLY RETURN AFTER HOOK DEFINITIONS ---
   if (!fund) return null
 
-  // Determine input label based on fund mode/type
-  const cashInputLabel = fund.type?.toLowerCase().includes('gcash')
+  const fundId = fund.id || fund.revolving_fund_id || fund.fund_id || 'N/A'
+  const fundName = fund.name || fund.fund_name || 'Unnamed Fund'
+
+  const fundTypeStr = String(fund.type || fund.fund_type || '').toLowerCase()
+  const isGcashFund = fundTypeStr.includes('gcash')
+  const cashInputLabel = isGcashFund
     ? 'Actual GCash / Digital Wallet Count'
     : 'Actual Physical Cash Count'
 
   const handleConfirmSubmit = () => {
-    onSubmitReport(fund.id, reportedDate, {
+    const closurePayload = {
+      cashonhand: isGcashFund ? 0 : actualCount,
+      gcash: isGcashFund ? actualCount : 0,
       expectedEndingBalance,
       actualCount,
       variance,
       varianceStatus,
-    })
+      reportedDate,
+      end_date: reportedDate,
+      remarks,
+    }
+
+    if (typeof onSubmitReport === 'function') {
+      onSubmitReport(closurePayload, fundId)
+    }
+
+    onClose()
   }
 
   const formatCurrency = (val) =>
     `₱${(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+
+  const isSubmitDisabled =
+    actualCountInput === '' ||
+    isNaN(parseFloat(actualCountInput)) ||
+    parseFloat(actualCountInput) < 0
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Submit & Finalize Fund Cycle">
       <div className="space-y-4">
         <p className="text-xs text-slate-600 leading-relaxed">
           Reconcile and finalize the report for{' '}
-          <strong className="text-slate-900">{fund.name}</strong> ({fund.id}).
+          <strong className="text-slate-900">{fundName}</strong> (ID: {fundId}).
         </p>
 
         {/* --- 1. FINANCIAL SUMMARY GRID --- */}
@@ -125,6 +164,7 @@ export default function SubmitRevolvingFundModal({ fund, isOpen, onClose, onSubm
             </span>
             <input
               type="number"
+              min="0"
               step="0.01"
               placeholder="0.00"
               value={actualCountInput}
@@ -138,8 +178,8 @@ export default function SubmitRevolvingFundModal({ fund, isOpen, onClose, onSubm
             <div className="flex items-start gap-2 p-2 bg-red-50 border border-red-200 rounded-lg text-[11px] text-red-700">
               <AlertTriangle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
               <span>
-                Actual cash count is <strong>{formatCurrency(Math.abs(variance))}</strong> less than
-                expected. Please verify unrecorded expenses or log a petty cash shortage note.
+                Actual count is <strong>{formatCurrency(Math.abs(variance))}</strong> less than
+                expected. Please verify unrecorded expenses or log a shortage note.
               </span>
             </div>
           )}
@@ -148,25 +188,40 @@ export default function SubmitRevolvingFundModal({ fund, isOpen, onClose, onSubm
             <div className="flex items-start gap-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-[11px] text-amber-800">
               <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
               <span>
-                Actual cash count is <strong>{formatCurrency(variance)}</strong> over the expected
+                Actual count is <strong>{formatCurrency(variance)}</strong> over the expected
                 balance. Please verify missing change or overage logs.
               </span>
             </div>
           )}
         </div>
 
-        {/* --- 3. REPORT DATE SELECTION --- */}
-        <div>
-          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-            Official Report Date
-          </label>
-          <input
-            type="date"
-            required
-            value={reportedDate}
-            onChange={(e) => setReportedDate(e.target.value)}
-            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837]"
-          />
+        {/* --- 3. REPORT DATE SELECTION & REMARKS --- */}
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              Official Report Date (Closure Date)
+            </label>
+            <input
+              type="date"
+              required
+              value={reportedDate}
+              onChange={(e) => setReportedDate(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837]"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+              Closure Remarks (Optional)
+            </label>
+            <textarea
+              rows={2}
+              placeholder="Add any closure or reconciliation notes..."
+              value={remarks}
+              onChange={(e) => setRemarks(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837]"
+            />
+          </div>
         </div>
 
         {/* Action Controls */}
@@ -181,7 +236,7 @@ export default function SubmitRevolvingFundModal({ fund, isOpen, onClose, onSubm
           <button
             type="button"
             onClick={handleConfirmSubmit}
-            disabled={actualCountInput === ''}
+            disabled={isSubmitDisabled}
             className="px-4 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 rounded-lg shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
           >
             <Send className="w-3.5 h-3.5" />

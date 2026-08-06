@@ -35,7 +35,7 @@ module.exports = {
       },
       rf_end_date: {
         type: Sequelize.DATE,
-        allowNull: false,
+        allowNull: true,
       },
       rf_beginning: {
         type: Sequelize.DECIMAL(10, 2),
