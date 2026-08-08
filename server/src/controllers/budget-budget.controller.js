@@ -3,6 +3,12 @@ const { Budget } = require('../database/models/Budget')
 const SQL = new SQLQueryBuilder()
 
 /**
+ * Transaction() expects an array of { sql, values }, but the query builder's
+ * .build() returns { sql, bindings }. This adapts one to the other.
+ */
+const toTxQuery = ({ sql, bindings }) => ({ sql, values: bindings })
+
+/**
  * @name upsertBudgetBudget
  * @description Create a new budget or top-up/update an existing budget.
  *              Automatically records entries into Budget History.
@@ -99,9 +105,11 @@ const upsertBudgetBudget = async (req, res) => {
         .where(Budget.Budget.pk, id)
         .build()
 
-      await Query(updateQuery.sql, updateQuery.bindings)
+      // Both the budget update and its history entry reference an id we
+      // already know (no generated-id dependency), so they can be batched
+      // into one real, all-or-nothing transaction.
+      const queries = [toTxQuery(updateQuery)]
 
-      // Automatically log transaction in budget history if amount changed
       if (addedAmount !== 0) {
         const historyQuery = SQL.model(Budget.History)
           .insert({
@@ -118,8 +126,10 @@ const upsertBudgetBudget = async (req, res) => {
           })
           .build()
 
-        await Query(historyQuery.sql, historyQuery.bindings)
+        queries.push(toTxQuery(historyQuery))
       }
+
+      await Transaction(queries)
 
       return res.status(200).json({ message: 'Budget updated successfully' })
     }
@@ -131,6 +141,9 @@ const upsertBudgetBudget = async (req, res) => {
 
     const initialAmount = parseFloat(amount)
 
+    // b_id is an autoincrement INTEGER — never set it manually. The history
+    // insert below needs this generated id, and Transaction() can't return
+    // generated ids mid-batch, so this insert stays standalone.
     const insertBudgetQuery = SQL.model(Budget.Budget)
       .insert({
         [Budget.Budget.cols.department_id]: department_id,
@@ -141,27 +154,43 @@ const upsertBudgetBudget = async (req, res) => {
       })
       .build()
 
-    // b_id is an autoincrement INTEGER — never set it manually.
-    // Read the generated id back from the insert result instead.
     const insertResult = await Query(insertBudgetQuery.sql, insertBudgetQuery.bindings)
     const newBudgetId = insertResult.insertId
 
-    // Automatically record initial history allocation ledger entry
-    const insertHistoryQuery = SQL.model(Budget.History)
-      .insert({
-        [Budget.History.cols.budget_id]: newBudgetId,
-        [Budget.History.cols.amount]: initialAmount,
-        [Budget.History.cols.previous_amount]: 0,
-        [Budget.History.cols.new_amount]: initialAmount,
-        [Budget.History.cols.remarks]: remarks || null,
-        [Budget.History.cols.department_id]: department_id,
-        [Budget.History.cols.type]: type || 'CASH',
-        [Budget.History.cols.date]: date || new Date(),
-        [Budget.History.cols.created_by]: userId,
-      })
-      .build()
+    try {
+      const insertHistoryQuery = SQL.model(Budget.History)
+        .insert({
+          [Budget.History.cols.budget_id]: newBudgetId,
+          [Budget.History.cols.amount]: initialAmount,
+          [Budget.History.cols.previous_amount]: 0,
+          [Budget.History.cols.new_amount]: initialAmount,
+          [Budget.History.cols.remarks]: remarks || null,
+          [Budget.History.cols.department_id]: department_id,
+          [Budget.History.cols.type]: type || 'CASH',
+          [Budget.History.cols.date]: date || new Date(),
+          [Budget.History.cols.created_by]: userId,
+        })
+        .build()
 
-    await Query(insertHistoryQuery.sql, insertHistoryQuery.bindings)
+      await Transaction([toTxQuery(insertHistoryQuery)])
+    } catch (txError) {
+      // Compensate: the budget row committed above, but its history entry
+      // failed — remove the orphaned budget row rather than leave a budget
+      // with no allocation ledger entry.
+      try {
+        const { sql: delSql, bindings: delBindings } = SQL.model(Budget.Budget)
+          .delete()
+          .where(Budget.Budget.pk, newBudgetId)
+          .build()
+        await Query(delSql, delBindings)
+      } catch (compensationError) {
+        console.error(
+          `CRITICAL: failed to compensate orphaned budget id ${newBudgetId} after transaction failure:`,
+          compensationError,
+        )
+      }
+      throw txError
+    }
 
     return res.status(201).json({
       message: 'Budget created successfully',

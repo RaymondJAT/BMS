@@ -15,6 +15,12 @@ const parseNum = (val, defaultVal = 0) => {
 }
 
 /**
+ * Transaction() expects an array of { sql, values }, but the query builder's
+ * .build() returns { sql, bindings }. This adapts one to the other.
+ */
+const toTxQuery = ({ sql, bindings }) => ({ sql, values: bindings })
+
+/**
  * A cash voucher may back at most 2 cash_disbursement rows
  * (e.g. an issue row + one reimbursement row). Prevents runaway
  * duplicate rows against the same voucher number.
@@ -79,33 +85,29 @@ const computeRfStatus = (currentStatus, liquidated, totalFund) => {
 }
 
 /**
- * Applies a delta to a budget's amount and writes the paired budget_history
- * row, using the Budget model (not raw SQL) so this stays consistent with
- * the dedicated Budget controller's source of truth.
+ * Builds the budget update + budget_history insert as Transaction-ready
+ * query objects, WITHOUT executing them. The caller must have already
+ * fetched budgetRow (e.g. via getBudgetById) so the previous amount is known.
  *
- * @param {number} budgetId
+ * @param {object} budgetRow - row previously fetched via getBudgetById
  * @param {number} delta - positive to credit (increase), negative to debit (decrease)
- * @param {'DEBIT'|'CREDIT'} historyType
  * @param {number} departmentId
  * @param {number} userId
  * @param {string} [remarks]
+ * @returns {{sql:string, values:Array}[]} two query objects: [budgetUpdate, historyInsert]
  */
-const applyBudgetChange = async (budgetId, delta, historyType, departmentId, userId, remarks) => {
-  const budgetRow = await getBudgetById(budgetId)
-  if (!budgetRow) throw new Error(`Budget ${budgetId} not found`)
-
+const buildBudgetChangeQueries = (budgetRow, delta, departmentId, userId, remarks) => {
   const previousAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
   const newAmount = previousAmount + delta
 
-  const { sql: updateSql, bindings: updateBindings } = SQL.model(Budget.Budget)
+  const updateQuery = SQL.model(Budget.Budget)
     .update({ [Budget.Budget.cols.amount]: newAmount })
-    .where(Budget.Budget.pk, budgetId)
+    .where(Budget.Budget.pk, budgetRow[Budget.Budget.cols.id])
     .build()
-  await Query(updateSql, updateBindings)
 
-  const { sql: historySql, bindings: historyBindings } = SQL.model(Budget.History)
+  const historyQuery = SQL.model(Budget.History)
     .insert({
-      [Budget.History.cols.budget_id]: budgetId,
+      [Budget.History.cols.budget_id]: budgetRow[Budget.Budget.cols.id],
       [Budget.History.cols.amount]: Math.abs(delta),
       [Budget.History.cols.previous_amount]: previousAmount,
       [Budget.History.cols.new_amount]: newAmount,
@@ -116,13 +118,12 @@ const applyBudgetChange = async (budgetId, delta, historyType, departmentId, use
       [Budget.History.cols.created_by]: userId,
     })
     .build()
-  await Query(historySql, historyBindings)
 
-  return newAmount
+  return [toTxQuery(updateQuery), toTxQuery(historyQuery)]
 }
 
-const logCdActivity = async (cashDisbursementId, amount, remarks, particulars) => {
-  const { sql, bindings } = SQL.model(Cash.DisbursementActivity)
+const buildCdActivityInsert = (cashDisbursementId, amount, remarks, particulars) => {
+  const query = SQL.model(Cash.DisbursementActivity)
     .insert({
       [Cash.DisbursementActivity.cols.cash_disbursement_id]: cashDisbursementId,
       [Cash.DisbursementActivity.cols.amount]: amount,
@@ -130,18 +131,34 @@ const logCdActivity = async (cashDisbursementId, amount, remarks, particulars) =
       [Cash.DisbursementActivity.cols.particulars]: particulars,
     })
     .build()
-  await Query(sql, bindings)
+  return toTxQuery(query)
 }
 
-const logRfActivity = async (revolvingFundId, remarks, userId) => {
-  const { sql, bindings } = SQL.model(Revolving.FundActivity)
+const buildRfActivityInsert = (revolvingFundId, remarks, userId) => {
+  const query = SQL.model(Revolving.FundActivity)
     .insert({
       [Revolving.FundActivity.cols.revolving_fund_id]: revolvingFundId,
       [Revolving.FundActivity.cols.remarks]: remarks,
       [Revolving.FundActivity.cols.user_id]: userId,
     })
     .build()
-  await Query(sql, bindings)
+  return toTxQuery(query)
+}
+
+const buildRfUpdate = (revolvingFundId, updateData) => {
+  const query = SQL.model(Revolving.Fund)
+    .update(updateData)
+    .where(Revolving.Fund.pk, revolvingFundId)
+    .build()
+  return toTxQuery(query)
+}
+
+const buildCdUpdate = (cashDisbursementId, updateData) => {
+  const query = SQL.model(Cash.Disbursement)
+    .update(updateData)
+    .where(Cash.Disbursement.pk, cashDisbursementId)
+    .build()
+  return toTxQuery(query)
 }
 
 // ==========================================
@@ -303,13 +320,11 @@ const issueCashDisbursement = async (req, res) => {
       return res.status(400).json({ message: 'Insufficient revolving fund balance.' })
     }
 
-    // TODO(transaction): wrap the writes below in Transaction() once its
-    // call signature is confirmed — this sequence spans cash_disbursement,
-    // cash_disbursement_activity, revolving_fund, revolving_fund_activity,
-    // budget, and budget_history, and must be all-or-nothing.
-
     const { outstanding, status } = computeCdStatus(issueAmount, 0, 0)
 
+    // Step 1: insert the CD row on its own — its auto-increment id is needed
+    // by the activity log below, and Transaction() can't return generated
+    // ids mid-batch, so this can't be folded into the same transaction.
     const insertCdQuery = SQL.model(Cash.Disbursement)
       .insert({
         [Cash.Disbursement.cols.date_issued]: date_issued || new Date(),
@@ -329,47 +344,67 @@ const issueCashDisbursement = async (req, res) => {
     const cdResult = await Query(insertCdQuery.sql, insertCdQuery.bindings)
     const newCdId = cdResult.insertId
 
-    await logCdActivity(
-      newCdId,
-      issueAmount,
-      `Issued amount: ₱${issueAmount.toFixed(2)}`,
-      particulars,
-    )
+    // Step 2: batch everything downstream into one real transaction —
+    // activity log, RF update + activity, budget update + history.
+    try {
+      const newRfIssued = parseNum(rf[Revolving.Fund.cols.issued]) + issueAmount
+      const newRfOutstanding = parseNum(rf[Revolving.Fund.cols.outstanding]) + issueAmount
+      const newRfBalance = currentBalance - issueAmount
+      const newRfStatus = computeRfStatus(
+        rf[Revolving.Fund.cols.status],
+        rf[Revolving.Fund.cols.liquidated],
+        rf[Revolving.Fund.cols.total_fund],
+      )
 
-    const newRfIssued = parseNum(rf[Revolving.Fund.cols.issued]) + issueAmount
-    const newRfOutstanding = parseNum(rf[Revolving.Fund.cols.outstanding]) + issueAmount
-    const newRfBalance = currentBalance - issueAmount
-    const newRfStatus = computeRfStatus(
-      rf[Revolving.Fund.cols.status],
-      rf[Revolving.Fund.cols.liquidated],
-      rf[Revolving.Fund.cols.total_fund],
-    )
+      const budgetRow = await getBudgetById(rf[Revolving.Fund.cols.budget_id])
+      if (!budgetRow) throw new Error(`Budget ${rf[Revolving.Fund.cols.budget_id]} not found`)
 
-    const { sql: rfUpdateSql, bindings: rfUpdateBindings } = SQL.model(Revolving.Fund)
-      .update({
-        [Revolving.Fund.cols.issued]: newRfIssued,
-        [Revolving.Fund.cols.outstanding]: newRfOutstanding,
-        [Revolving.Fund.cols.balance]: newRfBalance,
-        [Revolving.Fund.cols.status]: newRfStatus,
-      })
-      .where(Revolving.Fund.pk, revolving_fund_id)
-      .build()
-    await Query(rfUpdateSql, rfUpdateBindings)
+      const queries = [
+        buildCdActivityInsert(
+          newCdId,
+          issueAmount,
+          `Issued amount: ₱${issueAmount.toFixed(2)}`,
+          particulars,
+        ),
+        buildRfUpdate(revolving_fund_id, {
+          [Revolving.Fund.cols.issued]: newRfIssued,
+          [Revolving.Fund.cols.outstanding]: newRfOutstanding,
+          [Revolving.Fund.cols.balance]: newRfBalance,
+          [Revolving.Fund.cols.status]: newRfStatus,
+        }),
+        buildRfActivityInsert(
+          revolving_fund_id,
+          `Issued ₱${issueAmount.toFixed(2)} — issued (${newRfIssued}), outstanding (${newRfOutstanding}), balance (${newRfBalance}), status: ${newRfStatus}.`,
+          userId,
+        ),
+        ...buildBudgetChangeQueries(
+          budgetRow,
+          -issueAmount,
+          department_id,
+          userId,
+          `Cash disbursement issued (CV ${cash_voucher})`,
+        ),
+      ]
 
-    await logRfActivity(
-      revolving_fund_id,
-      `Issued ₱${issueAmount.toFixed(2)} — issued (${newRfIssued}), outstanding (${newRfOutstanding}), balance (${newRfBalance}), status: ${newRfStatus}.`,
-      userId,
-    )
-
-    await applyBudgetChange(
-      rf[Revolving.Fund.cols.budget_id],
-      -issueAmount,
-      'DEBIT',
-      department_id,
-      userId,
-      `Cash disbursement issued (CV ${cash_voucher})`,
-    )
+      await Transaction(queries)
+    } catch (txError) {
+      // Compensate: the CD row was committed on its own above, but the
+      // downstream batch failed — remove the orphaned CD row so we don't
+      // leave a disbursement with no matching RF/budget effect.
+      try {
+        const { sql: delSql, bindings: delBindings } = SQL.model(Cash.Disbursement)
+          .delete()
+          .where(Cash.Disbursement.pk, newCdId)
+          .build()
+        await Query(delSql, delBindings)
+      } catch (compensationError) {
+        console.error(
+          `CRITICAL: failed to compensate orphaned cash_disbursement id ${newCdId} after transaction failure:`,
+          compensationError,
+        )
+      }
+      throw txError
+    }
 
     return res.status(201).json({ message: 'Cash issued successfully', id: newCdId })
   } catch (error) {
@@ -441,23 +476,6 @@ const returnCashDisbursement = async (req, res) => {
       currentExpended,
     )
 
-    const { sql: cdUpdateSql, bindings: cdUpdateBindings } = SQL.model(Cash.Disbursement)
-      .update({
-        [Cash.Disbursement.cols.amount_returned]: newReturned,
-        [Cash.Disbursement.cols.outstanding_amount]: newOutstanding,
-        [Cash.Disbursement.cols.status]: newCdStatus,
-      })
-      .where(Cash.Disbursement.pk, id)
-      .build()
-    await Query(cdUpdateSql, cdUpdateBindings)
-
-    await logCdActivity(
-      id,
-      returnAmount,
-      `Returned amount: ₱${returnAmount.toFixed(2)}`,
-      cd[Cash.Disbursement.cols.particulars],
-    )
-
     const newRfReturned = parseNum(rf[Revolving.Fund.cols.returned]) + returnAmount
     const newRfLiquidated = parseNum(rf[Revolving.Fund.cols.liquidated]) + returnAmount
     const newRfBalance = parseNum(rf[Revolving.Fund.cols.balance]) + returnAmount
@@ -471,32 +489,45 @@ const returnCashDisbursement = async (req, res) => {
       rf[Revolving.Fund.cols.total_fund],
     )
 
-    const { sql: rfUpdateSql, bindings: rfUpdateBindings } = SQL.model(Revolving.Fund)
-      .update({
+    const budgetRow = await getBudgetById(rf[Revolving.Fund.cols.budget_id])
+    if (!budgetRow) {
+      return res.status(404).json({ message: 'Associated budget not found' })
+    }
+
+    const queries = [
+      buildCdUpdate(id, {
+        [Cash.Disbursement.cols.amount_returned]: newReturned,
+        [Cash.Disbursement.cols.outstanding_amount]: newOutstanding,
+        [Cash.Disbursement.cols.status]: newCdStatus,
+      }),
+      buildCdActivityInsert(
+        id,
+        returnAmount,
+        `Returned amount: ₱${returnAmount.toFixed(2)}`,
+        cd[Cash.Disbursement.cols.particulars],
+      ),
+      buildRfUpdate(rf[Revolving.Fund.cols.id], {
         [Revolving.Fund.cols.returned]: newRfReturned,
         [Revolving.Fund.cols.liquidated]: newRfLiquidated,
         [Revolving.Fund.cols.balance]: newRfBalance,
         [Revolving.Fund.cols.outstanding]: newRfOutstanding,
         [Revolving.Fund.cols.status]: newRfStatus,
-      })
-      .where(Revolving.Fund.pk, rf[Revolving.Fund.cols.id])
-      .build()
-    await Query(rfUpdateSql, rfUpdateBindings)
+      }),
+      buildRfActivityInsert(
+        rf[Revolving.Fund.cols.id],
+        `Returned ₱${returnAmount.toFixed(2)} — returned (${newRfReturned}), liquidated (${newRfLiquidated}), balance (${newRfBalance}), outstanding (${newRfOutstanding}), status: ${newRfStatus}.`,
+        userId,
+      ),
+      ...buildBudgetChangeQueries(
+        budgetRow,
+        returnAmount,
+        cd[Cash.Disbursement.cols.department_id],
+        userId,
+        `Cash disbursement return (CV ${cd[Cash.Disbursement.cols.cash_voucher]})`,
+      ),
+    ]
 
-    await logRfActivity(
-      rf[Revolving.Fund.cols.id],
-      `Returned ₱${returnAmount.toFixed(2)} — returned (${newRfReturned}), liquidated (${newRfLiquidated}), balance (${newRfBalance}), outstanding (${newRfOutstanding}), status: ${newRfStatus}.`,
-      userId,
-    )
-
-    await applyBudgetChange(
-      rf[Revolving.Fund.cols.budget_id],
-      returnAmount,
-      'CREDIT',
-      cd[Cash.Disbursement.cols.department_id],
-      userId,
-      `Cash disbursement return (CV ${cd[Cash.Disbursement.cols.cash_voucher]})`,
-    )
+    await Transaction(queries)
 
     return res.status(200).json({ message: 'Return recorded successfully' })
   } catch (error) {
@@ -570,23 +601,6 @@ const recordExpendedCashDisbursement = async (req, res) => {
       newExpended,
     )
 
-    const { sql: cdUpdateSql, bindings: cdUpdateBindings } = SQL.model(Cash.Disbursement)
-      .update({
-        [Cash.Disbursement.cols.amount_expended]: newExpended,
-        [Cash.Disbursement.cols.outstanding_amount]: newOutstanding,
-        [Cash.Disbursement.cols.status]: newCdStatus,
-      })
-      .where(Cash.Disbursement.pk, id)
-      .build()
-    await Query(cdUpdateSql, cdUpdateBindings)
-
-    await logCdActivity(
-      id,
-      expendedAmount,
-      `Expended amount: ₱${expendedAmount.toFixed(2)}`,
-      cd[Cash.Disbursement.cols.particulars],
-    )
-
     const newRfExpended = parseNum(rf[Revolving.Fund.cols.amount_expended]) + expendedAmount
     const newRfLiquidated = parseNum(rf[Revolving.Fund.cols.liquidated]) + expendedAmount
     const newRfOutstanding = Math.max(
@@ -599,22 +613,32 @@ const recordExpendedCashDisbursement = async (req, res) => {
       rf[Revolving.Fund.cols.total_fund],
     )
 
-    const { sql: rfUpdateSql, bindings: rfUpdateBindings } = SQL.model(Revolving.Fund)
-      .update({
+    const queries = [
+      buildCdUpdate(id, {
+        [Cash.Disbursement.cols.amount_expended]: newExpended,
+        [Cash.Disbursement.cols.outstanding_amount]: newOutstanding,
+        [Cash.Disbursement.cols.status]: newCdStatus,
+      }),
+      buildCdActivityInsert(
+        id,
+        expendedAmount,
+        `Expended amount: ₱${expendedAmount.toFixed(2)}`,
+        cd[Cash.Disbursement.cols.particulars],
+      ),
+      buildRfUpdate(rf[Revolving.Fund.cols.id], {
         [Revolving.Fund.cols.amount_expended]: newRfExpended,
         [Revolving.Fund.cols.liquidated]: newRfLiquidated,
         [Revolving.Fund.cols.outstanding]: newRfOutstanding,
         [Revolving.Fund.cols.status]: newRfStatus,
-      })
-      .where(Revolving.Fund.pk, rf[Revolving.Fund.cols.id])
-      .build()
-    await Query(rfUpdateSql, rfUpdateBindings)
+      }),
+      buildRfActivityInsert(
+        rf[Revolving.Fund.cols.id],
+        `Expended ₱${expendedAmount.toFixed(2)} — expended (${newRfExpended}), liquidated (${newRfLiquidated}), outstanding (${newRfOutstanding}), status: ${newRfStatus}.`,
+        userId,
+      ),
+    ]
 
-    await logRfActivity(
-      rf[Revolving.Fund.cols.id],
-      `Expended ₱${expendedAmount.toFixed(2)} — expended (${newRfExpended}), liquidated (${newRfLiquidated}), outstanding (${newRfOutstanding}), status: ${newRfStatus}.`,
-      userId,
-    )
+    await Transaction(queries)
 
     return res.status(200).json({ message: 'Expended amount recorded successfully' })
   } catch (error) {
@@ -690,8 +714,8 @@ const reimburseCashDisbursement = async (req, res) => {
       return res.status(400).json({ message: 'Insufficient revolving fund balance.' })
     }
 
-    // TODO(transaction): wrap in Transaction() — see note in issueCashDisbursement.
-
+    // Step 1: insert the CD row on its own — see note in issueCashDisbursement
+    // on why this can't be folded into the same transaction as the rest.
     const insertCdQuery = SQL.model(Cash.Disbursement)
       .insert({
         [Cash.Disbursement.cols.date_issued]: new Date(),
@@ -711,49 +735,65 @@ const reimburseCashDisbursement = async (req, res) => {
     const cdResult = await Query(insertCdQuery.sql, insertCdQuery.bindings)
     const newCdId = cdResult.insertId
 
-    await logCdActivity(
-      newCdId,
-      reimburseAmount,
-      `Reimbursed amount: ₱${reimburseAmount.toFixed(2)}`,
-      particulars,
-    )
+    // Step 2: batch everything downstream into one real transaction.
+    try {
+      const newRfIssued = parseNum(rf[Revolving.Fund.cols.issued]) + reimburseAmount
+      const newRfExpended = parseNum(rf[Revolving.Fund.cols.amount_expended]) + reimburseAmount
+      const newRfLiquidated = parseNum(rf[Revolving.Fund.cols.liquidated]) + reimburseAmount
+      const newRfBalance = currentBalance - reimburseAmount
+      const newRfStatus = computeRfStatus(
+        rf[Revolving.Fund.cols.status],
+        newRfLiquidated,
+        rf[Revolving.Fund.cols.total_fund],
+      )
 
-    const newRfIssued = parseNum(rf[Revolving.Fund.cols.issued]) + reimburseAmount
-    const newRfExpended = parseNum(rf[Revolving.Fund.cols.amount_expended]) + reimburseAmount
-    const newRfLiquidated = parseNum(rf[Revolving.Fund.cols.liquidated]) + reimburseAmount
-    const newRfBalance = currentBalance - reimburseAmount
-    const newRfStatus = computeRfStatus(
-      rf[Revolving.Fund.cols.status],
-      newRfLiquidated,
-      rf[Revolving.Fund.cols.total_fund],
-    )
+      const budgetRow = await getBudgetById(rf[Revolving.Fund.cols.budget_id])
+      if (!budgetRow) throw new Error(`Budget ${rf[Revolving.Fund.cols.budget_id]} not found`)
 
-    const { sql: rfUpdateSql, bindings: rfUpdateBindings } = SQL.model(Revolving.Fund)
-      .update({
-        [Revolving.Fund.cols.issued]: newRfIssued,
-        [Revolving.Fund.cols.amount_expended]: newRfExpended,
-        [Revolving.Fund.cols.liquidated]: newRfLiquidated,
-        [Revolving.Fund.cols.balance]: newRfBalance,
-        [Revolving.Fund.cols.status]: newRfStatus,
-      })
-      .where(Revolving.Fund.pk, revolving_fund_id)
-      .build()
-    await Query(rfUpdateSql, rfUpdateBindings)
+      const queries = [
+        buildCdActivityInsert(
+          newCdId,
+          reimburseAmount,
+          `Reimbursed amount: ₱${reimburseAmount.toFixed(2)}`,
+          particulars,
+        ),
+        buildRfUpdate(revolving_fund_id, {
+          [Revolving.Fund.cols.issued]: newRfIssued,
+          [Revolving.Fund.cols.amount_expended]: newRfExpended,
+          [Revolving.Fund.cols.liquidated]: newRfLiquidated,
+          [Revolving.Fund.cols.balance]: newRfBalance,
+          [Revolving.Fund.cols.status]: newRfStatus,
+        }),
+        buildRfActivityInsert(
+          revolving_fund_id,
+          `Reimbursed ₱${reimburseAmount.toFixed(2)} — issued (${newRfIssued}), expended (${newRfExpended}), liquidated (${newRfLiquidated}), balance (${newRfBalance}), status: ${newRfStatus}.`,
+          userId,
+        ),
+        ...buildBudgetChangeQueries(
+          budgetRow,
+          -reimburseAmount,
+          department_id,
+          userId,
+          `Cash disbursement reimbursement (CV ${cash_voucher})`,
+        ),
+      ]
 
-    await logRfActivity(
-      revolving_fund_id,
-      `Reimbursed ₱${reimburseAmount.toFixed(2)} — issued (${newRfIssued}), expended (${newRfExpended}), liquidated (${newRfLiquidated}), balance (${newRfBalance}), status: ${newRfStatus}.`,
-      userId,
-    )
-
-    await applyBudgetChange(
-      rf[Revolving.Fund.cols.budget_id],
-      -reimburseAmount,
-      'DEBIT',
-      department_id,
-      userId,
-      `Cash disbursement reimbursement (CV ${cash_voucher})`,
-    )
+      await Transaction(queries)
+    } catch (txError) {
+      try {
+        const { sql: delSql, bindings: delBindings } = SQL.model(Cash.Disbursement)
+          .delete()
+          .where(Cash.Disbursement.pk, newCdId)
+          .build()
+        await Query(delSql, delBindings)
+      } catch (compensationError) {
+        console.error(
+          `CRITICAL: failed to compensate orphaned cash_disbursement id ${newCdId} after transaction failure:`,
+          compensationError,
+        )
+      }
+      throw txError
+    }
 
     return res.status(201).json({ message: 'Reimbursement recorded successfully', id: newCdId })
   } catch (error) {

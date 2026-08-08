@@ -1,6 +1,7 @@
 const { Query, Transaction, SQLQueryBuilder } = require('../database/utilities/queries.util')
 const { Revolving } = require('../database/models/Revolving')
 const { Closed } = require('../database/models/Closed')
+const { Budget } = require('../database/models/Budget')
 
 const SQL = new SQLQueryBuilder()
 
@@ -30,6 +31,53 @@ const getDateBounds = () => {
     todayStr: formatDate(today),
     yesterdayStr: formatDate(yesterday),
   }
+}
+
+/**
+ * Transaction() expects an array of { sql, values }, but the query builder's
+ * .build() returns { sql, bindings }. This adapts one to the other.
+ */
+const toTxQuery = ({ sql, bindings }) => ({ sql, values: bindings })
+
+const getBudgetById = async (id) => {
+  const { sql, bindings } = SQL.model(Budget.Budget)
+    .select(Budget.Budget.select)
+    .where(Budget.Budget.pk, id)
+    .build()
+  const [row] = await Query(sql, bindings)
+  return row || null
+}
+
+/**
+ * Builds the budget update + budget_history insert as Transaction-ready
+ * query objects, WITHOUT executing them, using the Budget model (not raw
+ * SQL) so this stays consistent with the Budget and Cash Disbursement
+ * controllers' source of truth.
+ */
+const buildBudgetChangeQueries = (budgetRow, delta, departmentId, userId, remarks) => {
+  const previousAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
+  const newAmount = previousAmount + delta
+
+  const updateQuery = SQL.model(Budget.Budget)
+    .update({ [Budget.Budget.cols.amount]: newAmount })
+    .where(Budget.Budget.pk, budgetRow[Budget.Budget.cols.id])
+    .build()
+
+  const historyQuery = SQL.model(Budget.History)
+    .insert({
+      [Budget.History.cols.budget_id]: budgetRow[Budget.Budget.cols.id],
+      [Budget.History.cols.amount]: Math.abs(delta),
+      [Budget.History.cols.previous_amount]: previousAmount,
+      [Budget.History.cols.new_amount]: newAmount,
+      [Budget.History.cols.remarks]: remarks || null,
+      [Budget.History.cols.department_id]: departmentId,
+      [Budget.History.cols.type]: budgetRow[Budget.Budget.cols.type],
+      [Budget.History.cols.date]: new Date(),
+      [Budget.History.cols.created_by]: userId,
+    })
+    .build()
+
+  return [toTxQuery(updateQuery), toTxQuery(historyQuery)]
 }
 
 // ==========================================
@@ -74,6 +122,16 @@ const upsertRevolvingFund = async (req, res) => {
       // ==========================================
       // UPDATE FLOW
       // ==========================================
+      const existingQuery = SQL.model(Revolving.Fund)
+        .select([Revolving.Fund.cols.id])
+        .where(Revolving.Fund.pk, id)
+        .build()
+      const [existingFund] = await Query(existingQuery.sql, existingQuery.bindings)
+
+      if (!existingFund) {
+        return res.status(404).json({ message: 'Revolving Fund not found' })
+      }
+
       const updateData = {}
       if (budget_id !== undefined) updateData[Revolving.Fund.cols.budget_id] = budget_id
       if (year !== undefined) updateData[Revolving.Fund.cols.year] = parseNum(year)
@@ -101,9 +159,6 @@ const upsertRevolvingFund = async (req, res) => {
         updateData[Revolving.Fund.cols.status] = 'ON REVIEW'
       }
 
-      if (Revolving.Fund.cols.updatedAt) updateData[Revolving.Fund.cols.updatedAt] = new Date()
-      if (Revolving.Fund.cols.updatedBy) updateData[Revolving.Fund.cols.updatedBy] = userId
-
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ message: 'No data provided to update' })
       }
@@ -113,11 +168,10 @@ const upsertRevolvingFund = async (req, res) => {
         .where(Revolving.Fund.pk, id)
         .build()
 
-      const result = await Query(query.sql, query.bindings)
-
-      if (result.affectedRows === 0) {
-        return res.status(404).json({ message: 'Revolving Fund not found' })
-      }
+      // The RF update and its activity log both reference an id we already
+      // know (no generated-id dependency), so they batch into one real,
+      // all-or-nothing transaction.
+      const queries = [toTxQuery(query)]
 
       if (Revolving.FundActivity) {
         const activityQuery = SQL.model(Revolving.FundActivity)
@@ -127,14 +181,13 @@ const upsertRevolvingFund = async (req, res) => {
               updateData[Revolving.Fund.cols.status] || 'N/A'
             })`,
             [Revolving.FundActivity.cols.user_id]: userId,
-            ...(Revolving.FundActivity.cols.createdAt
-              ? { [Revolving.FundActivity.cols.createdAt]: new Date() }
-              : {}),
           })
           .build()
 
-        await Query(activityQuery.sql, activityQuery.bindings)
+        queries.push(toTxQuery(activityQuery))
       }
+
+      await Transaction(queries)
 
       return res.status(200).json({
         message: 'Revolving fund updated successfully',
@@ -150,17 +203,13 @@ const upsertRevolvingFund = async (req, res) => {
 
       const { todayStr, yesterdayStr } = getDateBounds()
 
-      const budgetQuery = await Query(
-        `SELECT b_id, b_amount, b_type, b_department_id FROM budget WHERE b_id = ?`,
-        [budget_id],
-      )
-      if (!budgetQuery || budgetQuery.length === 0) {
+      const budgetRow = await getBudgetById(budget_id)
+      if (!budgetRow) {
         return res.status(400).json({ message: 'Invalid budget ID' })
       }
 
-      const budgetData = budgetQuery[0]
-      const departmentId = budgetData.b_department_id
-      const budgetType = budgetData.b_type
+      const departmentId = budgetRow[Budget.Budget.cols.department_id]
+      const budgetType = budgetRow[Budget.Budget.cols.type]
 
       const unclosedYesterdayQuery = await Query(
         `SELECT 
@@ -203,7 +252,7 @@ const upsertRevolvingFund = async (req, res) => {
       const totalFundAmount =
         total_fund !== undefined ? parseNum(total_fund) : beginningAmount + addedAmount
 
-      if (parseNum(budgetData.b_amount) < beginningAmount) {
+      if (parseNum(budgetRow[Budget.Budget.cols.amount]) < beginningAmount) {
         return res.status(400).json({ message: 'Insufficient budget amount balance.' })
       }
 
@@ -216,6 +265,9 @@ const upsertRevolvingFund = async (req, res) => {
 
       const initialStatus = status || (initialIssued > 0 ? 'ON REVIEW' : 'OPEN')
 
+      // rf_id is an autoincrement INTEGER. Everything below (activity log,
+      // budget update) needs this generated id, and Transaction() can't
+      // return generated ids mid-batch, so this insert stays standalone.
       const insertFundQuery = SQL.model(Revolving.Fund)
         .insert({
           [Revolving.Fund.cols.budget_id]: budget_id,
@@ -235,89 +287,110 @@ const upsertRevolvingFund = async (req, res) => {
           [Revolving.Fund.cols.balance]:
             balance !== undefined ? parseNum(balance) : totalFundAmount,
           [Revolving.Fund.cols.status]: initialStatus,
-          ...(Revolving.Fund.cols.createdBy ? { [Revolving.Fund.cols.createdBy]: userId } : {}),
-          ...(Revolving.Fund.cols.createdAt ? { [Revolving.Fund.cols.createdAt]: new Date() } : {}),
         })
         .build()
 
       const resFund = await Query(insertFundQuery.sql, insertFundQuery.bindings)
       const newFundId = resFund.insertId
 
-      if (newFundId && Revolving.FundActivity) {
-        const activityQuery = SQL.model(Revolving.FundActivity)
-          .insert({
-            [Revolving.FundActivity.cols.revolving_fund_id]: newFundId,
-            [Revolving.FundActivity.cols.remarks]:
-              `Initial fund created (Status: ${initialStatus}, Amount: ₱${totalFundAmount.toFixed(
-                2,
-              )})`,
-            [Revolving.FundActivity.cols.user_id]: userId,
-            ...(Revolving.FundActivity.cols.createdAt
-              ? { [Revolving.FundActivity.cols.createdAt]: new Date() }
-              : {}),
-          })
-          .build()
+      try {
+        const queries = []
 
-        await Query(activityQuery.sql, activityQuery.bindings)
-      }
+        if (Revolving.FundActivity) {
+          const activityQuery = SQL.model(Revolving.FundActivity)
+            .insert({
+              [Revolving.FundActivity.cols.revolving_fund_id]: newFundId,
+              [Revolving.FundActivity.cols.remarks]:
+                `Initial fund created (Status: ${initialStatus}, Amount: ₱${totalFundAmount.toFixed(
+                  2,
+                )})`,
+              [Revolving.FundActivity.cols.user_id]: userId,
+            })
+            .build()
 
-      if (addedAmount > 0) {
-        const updatedBudgetAmount = parseNum(budgetData.b_amount) + addedAmount
-        await Query(`UPDATE budget SET b_amount = ? WHERE b_id = ?`, [
-          updatedBudgetAmount,
-          budget_id,
-        ])
-        await Query(
-          `INSERT INTO budget_history (bh_budget_id, bh_amount, bh_date, bh_type) VALUES (?, ?, ?, 'DEBIT')`,
-          [budget_id, addedAmount, todayStr],
-        )
-      }
+          queries.push(toTxQuery(activityQuery))
+        }
 
-      if (addedAmount > 0 && bank_account_id) {
-        const yyyy = now.getFullYear()
-        const mm = String(now.getMonth() + 1).padStart(2, '0')
-
-        const countQuery = await Query(
-          `SELECT COUNT(*) AS current_count FROM transaction WHERE t_reference_id LIKE ?`,
-          [`BA-${yyyy}-${mm}%`],
-        )
-        const currentCount = countQuery[0]?.current_count || 0
-        const sequence = `BA-${yyyy}-${mm}-${String(currentCount + 1).padStart(4, '0')}`
-
-        const deptQuery = await Query(
-          `SELECT md_description FROM master_department WHERE md_id = ?`,
-          [departmentId],
-        )
-        const departmentName = deptQuery[0]?.md_description || ''
-
-        const transactionResult = await Query(
-          `INSERT INTO transaction (
-            t_bank_account_id, t_reference_id, t_type, t_category, t_description, 
-            t_from_id, t_to_id, t_amount, t_net_amount, t_gross_amount, 
-            t_datetime, t_created_by, t_updated_by, t_updated_at, t_status
-          ) VALUES (?, ?, 'DEBIT', 'Budget', ?, 1, 2, ?, ?, ?, NOW(), ?, ?, NOW(), 'Paid')`,
-          [
-            bank_account_id,
-            sequence,
-            `Budget allocation for ${departmentName}`,
-            addedAmount,
-            addedAmount,
-            addedAmount,
-            userId,
-            userId,
-          ],
-        )
-
-        const transactionId = transactionResult.insertId
-
-        if (transactionId) {
-          await Query(
-            `INSERT INTO transaction_history (
-              th_transaction_id, th_from_id, th_to_id, th_status, th_created_by, th_created_at, th_amount
-            ) VALUES (?, 1, 2, 'Paid', ?, NOW(), ?)`,
-            [transactionId, userId, -addedAmount],
+        if (addedAmount > 0) {
+          queries.push(
+            ...buildBudgetChangeQueries(
+              budgetRow,
+              addedAmount,
+              departmentId,
+              userId,
+              `Initial funding for Revolving Fund #${newFundId}`,
+            ),
           )
         }
+
+        if (addedAmount > 0 && bank_account_id) {
+          const yyyy = now.getFullYear()
+          const mm = String(now.getMonth() + 1).padStart(2, '0')
+
+          // Reference sequence + department name are pure reads with no
+          // side effects, safe to resolve before the batch is built.
+          const countQuery = await Query(
+            `SELECT COUNT(*) AS current_count FROM transaction WHERE t_reference_id LIKE ?`,
+            [`BA-${yyyy}-${mm}%`],
+          )
+          const currentCount = countQuery[0]?.current_count || 0
+          const sequence = `BA-${yyyy}-${mm}-${String(currentCount + 1).padStart(4, '0')}`
+
+          const deptQuery = await Query(
+            `SELECT md_description FROM master_department WHERE md_id = ?`,
+            [departmentId],
+          )
+          const departmentName = deptQuery[0]?.md_description || ''
+
+          // No model provided for `transaction` / `transaction_history` —
+          // kept as raw parameterized SQL, but still included in the same
+          // Transaction() batch below for atomicity with everything else.
+          // NOTE: the transaction row's own generated id would normally be
+          // needed for transaction_history.th_transaction_id — since that
+          // can't be resolved mid-batch either, transaction_history is
+          // intentionally left out of this automated flow. Flagging this
+          // rather than guessing: confirm whether transaction_history should
+          // be written here, and if so, this insert needs to move to its
+          // own standalone-then-batch step the same way the RF/CD inserts do.
+          queries.push({
+            sql: `INSERT INTO transaction (
+              t_bank_account_id, t_reference_id, t_type, t_category, t_description, 
+              t_from_id, t_to_id, t_amount, t_net_amount, t_gross_amount, 
+              t_datetime, t_created_by, t_updated_by, t_updated_at, t_status
+            ) VALUES (?, ?, 'DEBIT', 'Budget', ?, 1, 2, ?, ?, ?, NOW(), ?, ?, NOW(), 'Paid')`,
+            values: [
+              bank_account_id,
+              sequence,
+              `Budget allocation for ${departmentName}`,
+              addedAmount,
+              addedAmount,
+              addedAmount,
+              userId,
+              userId,
+            ],
+          })
+        }
+
+        if (queries.length > 0) {
+          await Transaction(queries)
+        }
+      } catch (txError) {
+        // Compensate: the RF row committed above, but the downstream batch
+        // failed — remove the orphaned RF row so we don't leave a fund with
+        // no matching activity log / budget effect.
+        try {
+          const { sql: delSql, bindings: delBindings } = SQL.model(Revolving.Fund)
+            .delete()
+            .where(Revolving.Fund.pk, newFundId)
+            .build()
+          await Query(delSql, delBindings)
+        } catch (compensationError) {
+          console.error(
+            `CRITICAL: failed to compensate orphaned revolving_fund id ${newFundId} after transaction failure:`,
+            compensationError,
+          )
+        }
+        throw txError
       }
 
       return res.status(200).json({
@@ -378,9 +451,6 @@ const upsertClosedRevolvingFund = async (req, res) => {
       if (status !== undefined) updateData[ClosedModel.cols.status] = status
       if (created_by !== undefined) updateData[ClosedModel.cols.created_by] = created_by
 
-      if (ClosedModel.cols.updatedAt) updateData[ClosedModel.cols.updatedAt] = new Date()
-      if (ClosedModel.cols.updatedBy) updateData[ClosedModel.cols.updatedBy] = userId
-
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ message: 'No data provided to update' })
       }
@@ -406,6 +476,19 @@ const upsertClosedRevolvingFund = async (req, res) => {
           ? status.toUpperCase()
           : 'BALANCED'
 
+      // Resolved before the insert since it only needs revolving_fund_id
+      // (already known), not the closed record's own generated id.
+      const fundDetails = await Query(`SELECT rf_outstanding FROM revolving_fund WHERE rf_id = ?`, [
+        revolving_fund_id,
+      ])
+      const outstandingAmount = fundDetails[0] ? parseNum(fundDetails[0].rf_outstanding) : 0
+      const targetParentStatus = outstandingAmount > 0 ? 'CLOSED' : 'CLEARED'
+
+      // crf_id is an autoincrement INTEGER — nothing downstream actually
+      // needs it (the parent-status update and activity log only need
+      // revolving_fund_id, already known), but the insert still can't
+      // report its own insertId back through Transaction(), so it stays
+      // standalone for consistency with the rest of this file's pattern.
       const insertQuery = SQL.model(ClosedModel)
         .insert({
           [ClosedModel.cols.revolving_fund_id]: revolving_fund_id,
@@ -419,43 +502,54 @@ const upsertClosedRevolvingFund = async (req, res) => {
           [ClosedModel.cols.sub_total]: parseNum(sub_total),
           [ClosedModel.cols.status]: submitStatus,
           [ClosedModel.cols.created_by]: created_by || userId,
-          ...(ClosedModel.cols.createdAt ? { [ClosedModel.cols.createdAt]: new Date() } : {}),
         })
         .build()
 
       const insertResult = await Query(insertQuery.sql, insertQuery.bindings)
       closedRecordId = insertResult.insertId
 
-      const fundDetails = await Query(`SELECT rf_outstanding FROM revolving_fund WHERE rf_id = ?`, [
-        revolving_fund_id,
-      ])
-
-      const outstandingAmount = fundDetails[0] ? parseNum(fundDetails[0].rf_outstanding) : 0
-      const targetParentStatus = outstandingAmount > 0 ? 'CLOSED' : 'CLEARED'
-
-      const updateParentQuery = SQL.model(Revolving.Fund)
-        .update({
-          [Revolving.Fund.cols.status]: targetParentStatus,
-        })
-        .where(Revolving.Fund.pk, revolving_fund_id)
-        .build()
-
-      await Query(updateParentQuery.sql, updateParentQuery.bindings)
-
-      if (Revolving.FundActivity) {
-        const activityQuery = SQL.model(Revolving.FundActivity)
-          .insert({
-            [Revolving.FundActivity.cols.revolving_fund_id]: revolving_fund_id,
-            [Revolving.FundActivity.cols.remarks]:
-              `Revolving Fund submitted/reported with reconciliation status: ${submitStatus}. Parent status changed to ${targetParentStatus}.`,
-            [Revolving.FundActivity.cols.user_id]: userId,
-            ...(Revolving.FundActivity.cols.createdAt
-              ? { [Revolving.FundActivity.cols.createdAt]: new Date() }
-              : {}),
+      try {
+        const updateParentQuery = SQL.model(Revolving.Fund)
+          .update({
+            [Revolving.Fund.cols.status]: targetParentStatus,
           })
+          .where(Revolving.Fund.pk, revolving_fund_id)
           .build()
 
-        await Query(activityQuery.sql, activityQuery.bindings)
+        const queries = [toTxQuery(updateParentQuery)]
+
+        if (Revolving.FundActivity) {
+          const activityQuery = SQL.model(Revolving.FundActivity)
+            .insert({
+              [Revolving.FundActivity.cols.revolving_fund_id]: revolving_fund_id,
+              [Revolving.FundActivity.cols.remarks]:
+                `Revolving Fund submitted/reported with reconciliation status: ${submitStatus}. Parent status changed to ${targetParentStatus}.`,
+              [Revolving.FundActivity.cols.user_id]: userId,
+            })
+            .build()
+
+          queries.push(toTxQuery(activityQuery))
+        }
+
+        await Transaction(queries)
+      } catch (txError) {
+        // Compensate: the closed-fund submission committed above, but
+        // updating the parent fund's status failed — remove the orphaned
+        // submission rather than leave a reconciliation record whose parent
+        // fund was never actually closed/cleared.
+        try {
+          const { sql: delSql, bindings: delBindings } = SQL.model(ClosedModel)
+            .delete()
+            .where(ClosedModel.pk, closedRecordId)
+            .build()
+          await Query(delSql, delBindings)
+        } catch (compensationError) {
+          console.error(
+            `CRITICAL: failed to compensate orphaned closed_revolving_fund id ${closedRecordId} after transaction failure:`,
+            compensationError,
+          )
+        }
+        throw txError
       }
     }
 
@@ -490,11 +584,6 @@ const upsertRevolvingFundActivity = async (req, res) => {
       if (remarks !== undefined) updateData[Revolving.FundActivity.cols.remarks] = remarks
       if (user_id !== undefined) updateData[Revolving.FundActivity.cols.user_id] = user_id
 
-      if (Revolving.FundActivity.cols.updatedAt)
-        updateData[Revolving.FundActivity.cols.updatedAt] = new Date()
-      if (Revolving.FundActivity.cols.updatedBy)
-        updateData[Revolving.FundActivity.cols.updatedBy] = userId
-
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ message: 'No data provided to update' })
       }
@@ -515,12 +604,6 @@ const upsertRevolvingFundActivity = async (req, res) => {
           [Revolving.FundActivity.cols.revolving_fund_id]: revolving_fund_id,
           [Revolving.FundActivity.cols.remarks]: remarks,
           [Revolving.FundActivity.cols.user_id]: user_id || userId,
-          ...(Revolving.FundActivity.cols.createdBy
-            ? { [Revolving.FundActivity.cols.createdBy]: userId }
-            : {}),
-          ...(Revolving.FundActivity.cols.createdAt
-            ? { [Revolving.FundActivity.cols.createdAt]: new Date() }
-            : {}),
         })
         .build()
     }
