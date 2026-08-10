@@ -465,10 +465,11 @@ const returnCashDisbursement = async (req, res) => {
   /* 
     #swagger.parameters['id'] = { in: 'formData', type: 'integer', required: true, description: 'Cash disbursement id' }
     #swagger.parameters['amount_return'] = { in: 'formData', type: 'number', required: true, description: 'Amount being returned' }
+    #swagger.parameters['revolving_fund_id'] = { in: 'formData', type: 'integer', required: false, description: 'Fund to credit the return to — defaults to the disbursement\'s own fund' }
   */
 
   const userId = req.userId || req.user?.id || 1
-  const { id, amount_return } = req.body
+  const { id, amount_return, revolving_fund_id } = req.body
 
   if (!id) {
     return res.status(400).json({ message: 'Missing required field: id' })
@@ -496,9 +497,12 @@ const returnCashDisbursement = async (req, res) => {
       })
     }
 
-    const rf = await getRevolvingFundById(cd[Cash.Disbursement.cols.revolving_fund_id])
+    // Credit target defaults to the disbursement's own fund, but the caller
+    // may choose a different fund to receive the returned cash.
+    const targetFundId = revolving_fund_id || cd[Cash.Disbursement.cols.revolving_fund_id]
+    const rf = await getRevolvingFundById(targetFundId)
     if (!rf) {
-      return res.status(404).json({ message: 'Associated revolving fund not found' })
+      return res.status(404).json({ message: 'Target revolving fund not found' })
     }
 
     // TODO(transaction): wrap in Transaction() — see note in issueCashDisbursement.

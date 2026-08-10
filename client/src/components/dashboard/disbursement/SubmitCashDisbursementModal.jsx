@@ -3,44 +3,44 @@ import { Modal } from '../../ui/Modal'
 
 /**
  * Records a return and/or expended amount against an existing disbursement.
- * Differences from the old mock version:
- * - Revolving Fund re-select removed — return/expend actions don't take a
- *   revolving_fund_id, it's derived server-side from the disbursement's
- *   existing revolving_fund_id.
- * - Submits via two sequential calls (submitLiquidation in the hook) since
- *   the backend has no combined return+expend endpoint. If one succeeds and
- *   the other fails, the error message reflects that and the table will
- *   show whichever half committed after a refetch.
+ * Automates Return vs. Reimbursement calculations based on Amount Expended vs Amount Issued.
  */
 export default function SubmitCashDisbursementModal({
   isOpen,
   onClose,
   disbursement,
+  revolvingFunds = [],
   onSubmit,
   isSubmitting,
   getFundLabel,
 }) {
+  const [revolvingFundId, setRevolvingFundId] = useState('')
   const [amountExpended, setAmountExpended] = useState('')
-  const [amountReturned, setAmountReturned] = useState('')
   const [formError, setFormError] = useState(null)
 
   useEffect(() => {
     if (disbursement) {
+      setRevolvingFundId(
+        disbursement.revolving_fund_id ? String(disbursement.revolving_fund_id) : '',
+      )
       setAmountExpended('')
-      setAmountReturned('')
       setFormError(null)
     }
   }, [disbursement])
 
   const amountIssued = disbursement ? parseFloat(disbursement.amount_issued || 0) : 0
-  const currentOutstanding = disbursement ? parseFloat(disbursement.outstanding_amount || 0) : 0
 
-  const dynamicRemainingOutstanding = useMemo(() => {
-    const expended = parseFloat(amountExpended) || 0
-    const returned = parseFloat(amountReturned) || 0
-    const remaining = currentOutstanding - (expended + returned)
-    return remaining < 0 ? 0 : remaining
-  }, [currentOutstanding, amountExpended, amountReturned])
+  // Calculate return or reimbursement dynamically
+  const { difference, isReimbursement, displayAmount } = useMemo(() => {
+    const exp = parseFloat(amountExpended) || 0
+    const diff = amountIssued - exp
+
+    return {
+      difference: diff,
+      isReimbursement: diff < 0,
+      displayAmount: Math.abs(diff).toFixed(2),
+    }
+  }, [amountIssued, amountExpended])
 
   if (!disbursement) return null
 
@@ -48,39 +48,33 @@ export default function SubmitCashDisbursementModal({
     e.preventDefault()
     setFormError(null)
 
-    const exp = parseFloat(amountExpended) || 0
-    const ret = parseFloat(amountReturned) || 0
-
-    if (exp <= 0 && ret <= 0) {
-      setFormError('Enter an amount expended and/or returned greater than zero.')
-      return
-    }
-    if (ret > currentOutstanding) {
-      setFormError(
-        `Return amount (₱${ret.toFixed(2)}) cannot exceed outstanding balance (₱${currentOutstanding.toFixed(2)}).`,
-      )
+    if (!revolvingFundId) {
+      setFormError('Please select a revolving fund.')
       return
     }
 
-    const totalAccounted = exp + ret
-    if (totalAccounted < currentOutstanding - 0.01) {
-      const shortfall = currentOutstanding - totalAccounted
-      setFormError(
-        `This report only accounts for ₱${totalAccounted.toFixed(2)} of the ₱${currentOutstanding.toFixed(2)} outstanding. Enter the remaining ₱${shortfall.toFixed(2)} (as expended or returned) to fully liquidate this disbursement.`,
-      )
+    const exp = parseFloat(amountExpended)
+    if (isNaN(exp) || exp < 0) {
+      setFormError('Please enter a valid amount expended.')
       return
     }
+
+    // Amount to return to company (positive difference) or 0 if reimbursed
+    const ret = difference > 0 ? difference : 0
 
     const result = await onSubmit({
       disbursement,
+      revolving_fund_id: revolvingFundId,
       amount_return: ret,
       amount_expended: exp,
+      is_reimbursement: isReimbursement,
+      reimbursement_amount: isReimbursement ? Math.abs(difference) : 0,
     })
 
     if (result?.success) {
       onClose()
     } else {
-      setFormError(result?.message || 'Failed to record return/expended.')
+      setFormError(result?.message || 'Failed to record liquidation.')
     }
   }
 
@@ -88,7 +82,7 @@ export default function SubmitCashDisbursementModal({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title="Record Return / Expended"
+      title="Record Liquidation"
       subtitle="Settle outstanding cash for this disbursement voucher."
       maxWidth="max-w-lg"
     >
@@ -113,77 +107,86 @@ export default function SubmitCashDisbursementModal({
             </span>
             <span className="font-bold text-slate-800">{disbursement.id ?? 'N/A'}</span>
           </div>
-          <div className="col-span-2">
-            <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">
-              Revolving Fund
-            </span>
-            <span className="font-semibold text-slate-700 truncate block">
-              {getFundLabel(disbursement.revolving_fund_id)}
-            </span>
+        </div>
+
+        {/* Revolving Fund (75% Width) & Amount Expended (25% Width) */}
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="sm:col-span-3">
+            <label className="block text-xs font-bold text-slate-700 mb-1">
+              Target Revolving Fund <span className="text-red-500">*</span>
+            </label>
+            <select
+              required
+              value={revolvingFundId}
+              onChange={(e) => setRevolvingFundId(e.target.value)}
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
+            >
+              <option value="">Select Revolving Fund...</option>
+              {revolvingFunds.map((fund) => (
+                <option key={fund.id} value={fund.id}>
+                  {getFundLabel ? getFundLabel(fund.id) : fund.name || `Fund #${fund.id}`}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="sm:col-span-1">
+            <label
+              className="block text-xs font-bold text-slate-700 mb-1 truncate"
+              title="Amount Expended"
+            >
+              Amount Expended <span className="text-red-500">*</span>
+            </label>
+            <div className="relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
+                ₱
+              </span>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                required
+                placeholder="0.00"
+                value={amountExpended}
+                onChange={(e) => setAmountExpended(e.target.value)}
+                className="w-full pl-6 pr-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
+              />
+            </div>
           </div>
         </div>
 
-        {/* Amount Summary */}
+        {/* Amount Summary Displays */}
         <div className="grid grid-cols-2 gap-3">
           <div className="p-2.5 bg-amber-50/60 border border-amber-200/70 rounded-lg">
             <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">
-              Amount Issued
+              Requested Amount (Issued)
             </span>
             <span className="text-sm font-extrabold text-amber-900">
               ₱{amountIssued.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
             </span>
           </div>
-          <div className="p-2.5 bg-red-50/60 border border-red-200/70 rounded-lg">
-            <span className="text-[10px] font-bold text-red-700 uppercase tracking-wider block">
-              Remaining After This
+
+          <div
+            className={`p-2.5 border rounded-lg ${
+              isReimbursement
+                ? 'bg-blue-50/60 border-blue-200/70'
+                : 'bg-emerald-50/60 border-emerald-200/70'
+            }`}
+          >
+            <span
+              className={`text-[10px] font-bold uppercase tracking-wider block ${
+                isReimbursement ? 'text-blue-700' : 'text-emerald-700'
+              }`}
+            >
+              {isReimbursement ? 'For Reimbursement' : 'To Be Returned'}
             </span>
-            <span className="text-sm font-extrabold text-red-900">
-              ₱{dynamicRemainingOutstanding.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            <span
+              className={`text-sm font-extrabold ${
+                isReimbursement ? 'text-blue-900' : 'text-emerald-900'
+              }`}
+            >
+              ₱{parseFloat(displayAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
             </span>
-          </div>
-        </div>
-
-        <p className="text-[11px] text-slate-500">
-          Current outstanding: ₱
-          {currentOutstanding.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-        </p>
-
-        {/* Amount Expended & Returned */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Amount Expended</label>
-            <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
-                ₱
-              </span>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="0.00"
-                value={amountExpended}
-                onChange={(e) => setAmountExpended(e.target.value)}
-                className="w-full pl-6 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold text-slate-700 mb-1">Amount Return</label>
-            <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">
-                ₱
-              </span>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                placeholder="0.00"
-                value={amountReturned}
-                onChange={(e) => setAmountReturned(e.target.value)}
-                className="w-full pl-6 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
-              />
-            </div>
           </div>
         </div>
 
@@ -200,7 +203,7 @@ export default function SubmitCashDisbursementModal({
             disabled={isSubmitting}
             className="px-4 py-1.5 bg-[#E31837] hover:bg-[#c4122e] text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs disabled:opacity-50"
           >
-            {isSubmitting ? 'Submitting...' : 'Submit'}
+            {isSubmitting ? 'Submitting...' : 'Submit Liquidation'}
           </button>
         </div>
       </form>

@@ -115,8 +115,16 @@ function DisbursementsPage() {
         getEmployeeName,
         getDepartmentName,
         getParticularsName,
+        allDisbursements: disbursements,
       }),
-    [handleEdit, handleSubmitAction, getEmployeeName, getDepartmentName, getParticularsName],
+    [
+      handleEdit,
+      handleSubmitAction,
+      getEmployeeName,
+      getDepartmentName,
+      getParticularsName,
+      disbursements,
+    ],
   )
 
   return (
@@ -284,6 +292,7 @@ function DisbursementsPage() {
           isOpen={activeModal === 'submit'}
           onClose={handleCloseModal}
           disbursement={selectedDisbursement}
+          revolvingFunds={revolvingFunds}
           onSubmit={submitLiquidation}
           isSubmitting={isMutating}
           getFundLabel={getFundLabel}

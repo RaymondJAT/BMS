@@ -38,7 +38,7 @@ function useCloseRevolvingFund() {
 
     const payload = {
       revolving_fund_id: fundId,
-      end_date: submissionDate, 
+      end_date: submissionDate,
       cashonhand: cashOnHand,
       gcash: gcash,
       total_cash: cashOnHand + gcash,

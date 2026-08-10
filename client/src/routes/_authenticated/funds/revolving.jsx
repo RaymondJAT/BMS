@@ -25,6 +25,7 @@ import useRevolvingFundForm from '../../../hooks/useRevolvingFundForm'
 import useRevolvingFundActivity from '../../../hooks/useRevolvingFundActivity'
 import useCloseRevolvingFund from '../../../hooks/useCloseRevolvingFund'
 import useBudgets from '../../../hooks/useBudgets'
+import { useCashDisbursements } from '../../../hooks/useCashDisbursements'
 
 export const Route = createFileRoute('/_authenticated/funds/revolving')({
   component: RevolvingFundPage,
@@ -47,6 +48,33 @@ function RevolvingFundPage() {
 
   // React Query / Custom Hooks
   const { funds = [], metrics = {}, isLoading, error, fetchRevolvingFunds } = useRevolvingFunds()
+
+  // Cash disbursements are fetched here too so the table can derive each
+  // fund's reimbursed total — a reimbursement is a separate cash_disbursement
+  // row sharing the same cash_voucher as an earlier row (see
+  // reimburseCashDisbursement), so there's no rf_reimbursed column to read
+  // directly off the fund; it has to be summed client-side.
+  const { disbursements = [] } = useCashDisbursements()
+
+  const reimbursedByFund = useMemo(() => {
+    const totals = {}
+    disbursements.forEach((row) => {
+      const hasOriginal = disbursements.some(
+        (d) => d.cash_voucher === row.cash_voucher && d.id < row.id,
+      )
+      if (hasOriginal) {
+        const fundId = row.revolving_fund_id
+        totals[fundId] = (totals[fundId] || 0) + parseFloat(row.amount_issued || 0)
+      }
+    })
+    return totals
+  }, [disbursements])
+
+  const getReimbursedAmount = useCallback(
+    (fundId) => reimbursedByFund[fundId] || 0,
+    [reimbursedByFund],
+  )
+
   const {
     isModalOpen: isCreateOpen,
     formData,
@@ -127,8 +155,9 @@ function RevolvingFundPage() {
         onView: handleView,
         onEdit: handleEdit,
         onSubmit: handleSubmit,
+        getReimbursedAmount,
       }),
-    [handleView, handleEdit, handleSubmit],
+    [handleView, handleEdit, handleSubmit, getReimbursedAmount],
   )
 
   return (

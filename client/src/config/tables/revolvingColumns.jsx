@@ -4,8 +4,20 @@ import { FileCheck2, AlertCircle, CheckCircle2, Calendar, Eye, Edit3 } from 'luc
 /**
  * Professional Revolving Fund Columns Definition
  * Aligned with revolvingController backend response schema.
+ *
+ * getReimbursedAmount(fundId) is supplied by the page — a reimbursement is
+ * a separate cash_disbursement row sharing the same cash_voucher as an
+ * earlier row (see reimburseCashDisbursement), so there's no rf_reimbursed
+ * column to read directly; the total is derived client-side from the
+ * disbursements list and passed in as a lookup function.
  */
-export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }) {
+export function createRevolvingColumns({
+  onView,
+  onEdit,
+  onSubmit,
+  onLiquidate,
+  getReimbursedAmount,
+}) {
   const handleSubmitAction = onSubmit || onLiquidate
 
   return [
@@ -96,6 +108,8 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
         const liquidated = parseFloat(row.liquidated || 0)
         const returned = parseFloat(row.returned || row.cashReturned || 0)
         const unliquidated = parseFloat(row.unliquidated || 0)
+        const fundId = row.id || row.revolving_fund_id
+        const reimbursed = getReimbursedAmount ? getReimbursedAmount(fundId) : 0
 
         return (
           <div className="space-y-0.5">
@@ -118,6 +132,15 @@ export function createRevolvingColumns({ onView, onEdit, onSubmit, onLiquidate }
                 Returned:{' '}
                 <span className="font-semibold">
                   ₱{returned.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            )}
+
+            {reimbursed > 0 && (
+              <div className="text-[11px] text-purple-600 font-medium">
+                Reimbursed:{' '}
+                <span className="font-semibold">
+                  ₱{reimbursed.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </span>
               </div>
             )}

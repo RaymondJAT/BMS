@@ -1,33 +1,53 @@
-import { Edit3, Send, Calendar, User, Building, AlertCircle } from 'lucide-react'
+import { Edit3, Send, Calendar, User, Building, AlertCircle, ArrowUpRight } from 'lucide-react'
 
-/**
- * Cash Disbursement Columns — aligned with the real backend field names
- * (id, date_issued, received_by, department_id, particulars, cash_voucher,
- * amount_issued, amount_returned, amount_expended, outstanding_amount,
- * status). received_by / department_id / particulars are all foreign key
- * ids, resolved to display names via the lookup functions passed in.
- *
- * The "View" action from the original mock UI is intentionally omitted —
- * there's no ViewCashDisbursementModal wired up on the backend side yet.
- */
 export function createDisbursementColumns({
   onEdit,
   onSubmit,
   getEmployeeName,
   getDepartmentName,
   getParticularsName,
+  allDisbursements = [],
 }) {
+  // A reimbursement is a separate cash_disbursement row sharing the same
+  // cash_voucher, created after the original (higher id). There's no
+  // reimbursement_amount field on the row itself — it has to be resolved
+  // by finding that sibling row.
+  const findReimbursementSibling = (row) => {
+    if (!row.cash_voucher) return null
+    return (
+      allDisbursements.find((d) => d.cash_voucher === row.cash_voucher && d.id > row.id) || null
+    )
+  }
+
+  const findOriginalSibling = (row) => {
+    if (!row.cash_voucher) return null
+    return (
+      allDisbursements.find((d) => d.cash_voucher === row.cash_voucher && d.id < row.id) || null
+    )
+  }
+
   return [
     {
       header: 'ID & Voucher',
       accessorKey: 'cash_voucher',
       sortable: true,
-      cell: (row) => (
-        <div className="py-0.5">
-          <p className="font-semibold text-slate-900 text-sm">{row.cash_voucher || 'N/A'}</p>
-          <p className="text-[11px] text-slate-400 font-mono mt-0.5">ID: {row.id ?? 'N/A'}</p>
-        </div>
-      ),
+      cell: (row) => {
+        const isReimbursementRow = Boolean(findOriginalSibling(row))
+        return (
+          <div className="py-0.5">
+            <div className="flex items-center gap-1.5">
+              <p className="font-semibold text-slate-900 text-sm">{row.cash_voucher || 'N/A'}</p>
+              {isReimbursementRow && (
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                  <ArrowUpRight className="w-2.5 h-2.5" />
+                  Reimbursement
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 font-mono mt-0.5">ID: {row.id ?? 'N/A'}</p>
+          </div>
+        )
+      },
     },
     {
       header: 'Purpose',
@@ -93,6 +113,10 @@ export function createDisbursementColumns({
         const issued = parseFloat(row.amount_issued || 0)
         const expended = parseFloat(row.amount_expended || 0)
         const returned = parseFloat(row.amount_returned || 0)
+        const reimbursementSibling = findReimbursementSibling(row)
+        const reimbursed = reimbursementSibling
+          ? parseFloat(reimbursementSibling.amount_issued || 0)
+          : 0
 
         return (
           <div className="space-y-0.5 py-0.5 text-right">
@@ -121,6 +145,18 @@ export function createDisbursementColumns({
                 <span className="font-semibold">
                   ₱
                   {returned.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                  })}
+                </span>
+              </div>
+            )}
+
+            {reimbursed > 0 && (
+              <div className="text-[11px] text-purple-600 font-medium">
+                Reimbursed:{' '}
+                <span className="font-semibold">
+                  ₱
+                  {reimbursed.toLocaleString(undefined, {
                     minimumFractionDigits: 2,
                   })}
                 </span>
@@ -167,8 +203,6 @@ export function createDisbursementColumns({
       accessorKey: 'status',
       align: 'center',
       cell: (row) => {
-        // Real backend ENUM: LIQUIDATED / UNLIQUIDATED — not the mock's
-        // Issued/Liquidated/Cancelled set.
         const status = row.status || 'UNLIQUIDATED'
 
         const statusStyles = {

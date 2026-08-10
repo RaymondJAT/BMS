@@ -406,8 +406,9 @@ const upsertClosedRevolvingFund = async (req, res) => {
     gcash,
     total_cash,
     sub_total,
-    status, // Expected: 'BALANCED', 'SHORT', or 'OVER'
+    status,
     created_by,
+    end_date,
   } = req.body
 
   const ClosedModel = Closed.RevolvingFund
@@ -494,6 +495,7 @@ const upsertClosedRevolvingFund = async (req, res) => {
         const updateParentQuery = SQL.model(Revolving.Fund)
           .update({
             [Revolving.Fund.cols.status]: targetParentStatus,
+            ...(end_date !== undefined ? { [Revolving.Fund.cols.end_date]: end_date } : {}),
           })
           .where(Revolving.Fund.pk, revolving_fund_id)
           .build()

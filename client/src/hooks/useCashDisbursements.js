@@ -91,41 +91,59 @@ export function useCashDisbursements(initialParams = {}) {
    * 2-per-voucher limit is designed for.
    */
   const submitLiquidation = useCallback(
-    async ({ disbursement, amount_return = 0, amount_expended = 0 }) => {
+    async ({
+      disbursement,
+      revolving_fund_id,
+      amount_return = 0,
+      amount_expended = 0,
+      is_reimbursement = false,
+      reimbursement_amount = 0,
+    }) => {
       setIsMutating(true)
       try {
         const outstanding = parseFloat(disbursement.outstanding_amount || 0)
-        const returnAmt = Math.min(parseFloat(amount_return) || 0, outstanding)
-        const remainingAfterReturn = Math.max(0, outstanding - returnAmt)
-        const expendedRequested = parseFloat(amount_expended) || 0
-        const expendedToRecord = Math.min(expendedRequested, remainingAfterReturn)
-        const reimburseExcess = Math.max(0, expendedRequested - remainingAfterReturn)
+        const expendedToRecord = Math.min(parseFloat(amount_expended) || 0, outstanding)
 
-        if (returnAmt > 0) {
-          await cashDisbursementApi.returnCash({ id: disbursement.id, amount_return: returnAmt })
-        }
         if (expendedToRecord > 0) {
           await cashDisbursementApi.recordExpended({
             id: disbursement.id,
             amount_expended: expendedToRecord,
           })
         }
-        if (reimburseExcess > 0) {
-          await cashDisbursementApi.reimburse({
-            revolving_fund_id: disbursement.revolving_fund_id,
-            received_by: disbursement.received_by,
-            department_id: disbursement.department_id,
-            particulars: disbursement.particulars,
-            amount_reimburse: reimburseExcess,
-            cash_voucher: disbursement.cash_voucher,
-          })
+
+        if (!is_reimbursement) {
+          const returnToRecord = Math.min(
+            parseFloat(amount_return) || 0,
+            Math.max(0, outstanding - expendedToRecord),
+          )
+          if (returnToRecord > 0) {
+            await cashDisbursementApi.returnCash({
+              id: disbursement.id,
+              amount_return: returnToRecord,
+              revolving_fund_id: revolving_fund_id || disbursement.revolving_fund_id,
+            })
+          }
+        }
+
+        if (is_reimbursement) {
+          const reimburseAmt = parseFloat(reimbursement_amount) || 0
+          if (reimburseAmt > 0) {
+            await cashDisbursementApi.reimburse({
+              revolving_fund_id: revolving_fund_id || disbursement.revolving_fund_id,
+              received_by: disbursement.received_by,
+              department_id: disbursement.department_id,
+              particulars: disbursement.particulars,
+              amount_reimburse: reimburseAmt,
+              cash_voucher: disbursement.cash_voucher,
+            })
+          }
         }
 
         await fetchDisbursements()
-        return { success: true, reimbursed: reimburseExcess }
+        return { success: true }
       } catch (err) {
         console.error('Submit liquidation failed:', err)
-        await fetchDisbursements() // pick up whichever part may have committed
+        await fetchDisbursements()
         const message = err.response?.data?.message || 'Something went wrong. Please try again.'
         return { success: false, message }
       } finally {
