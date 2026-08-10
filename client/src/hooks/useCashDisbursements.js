@@ -83,28 +83,49 @@ export function useCashDisbursements(initialParams = {}) {
   )
 
   /**
-   * Convenience wrapper for the "Submit Liquidation" flow: the backend has
-   * no single endpoint that records both a return and an expended amount
-   * at once, so this fires them sequentially. If amount_return succeeds but
-   * amount_expended then fails, the disbursement is left partially updated
-   * (return recorded, expense not) — the caller should surface the error
-   * and let the person retry just the expended portion.
+   * Submits a liquidation report: settles the existing outstanding via
+   * return + expended, and if the reported expended amount exceeds what's
+   * left after the return (employee spent out of pocket), auto-triggers a
+   * reimbursement for the excess — reusing the original cash_voucher, which
+   * is exactly the "issue row + reimbursement row" pattern the backend's
+   * 2-per-voucher limit is designed for.
    */
   const submitLiquidation = useCallback(
-    async ({ id, amount_return, amount_expended }) => {
+    async ({ disbursement, amount_return = 0, amount_expended = 0 }) => {
       setIsMutating(true)
       try {
-        if (amount_return > 0) {
-          await cashDisbursementApi.returnCash({ id, amount_return })
+        const outstanding = parseFloat(disbursement.outstanding_amount || 0)
+        const returnAmt = Math.min(parseFloat(amount_return) || 0, outstanding)
+        const remainingAfterReturn = Math.max(0, outstanding - returnAmt)
+        const expendedRequested = parseFloat(amount_expended) || 0
+        const expendedToRecord = Math.min(expendedRequested, remainingAfterReturn)
+        const reimburseExcess = Math.max(0, expendedRequested - remainingAfterReturn)
+
+        if (returnAmt > 0) {
+          await cashDisbursementApi.returnCash({ id: disbursement.id, amount_return: returnAmt })
         }
-        if (amount_expended > 0) {
-          await cashDisbursementApi.recordExpended({ id, amount_expended })
+        if (expendedToRecord > 0) {
+          await cashDisbursementApi.recordExpended({
+            id: disbursement.id,
+            amount_expended: expendedToRecord,
+          })
         }
+        if (reimburseExcess > 0) {
+          await cashDisbursementApi.reimburse({
+            revolving_fund_id: disbursement.revolving_fund_id,
+            received_by: disbursement.received_by,
+            department_id: disbursement.department_id,
+            particulars: disbursement.particulars,
+            amount_reimburse: reimburseExcess,
+            cash_voucher: disbursement.cash_voucher,
+          })
+        }
+
         await fetchDisbursements()
-        return { success: true }
+        return { success: true, reimbursed: reimburseExcess }
       } catch (err) {
         console.error('Submit liquidation failed:', err)
-        await fetchDisbursements() // pick up whichever half may have committed
+        await fetchDisbursements() // pick up whichever part may have committed
         const message = err.response?.data?.message || 'Something went wrong. Please try again.'
         return { success: false, message }
       } finally {

@@ -97,7 +97,8 @@ const getParticularsNameById = async (particularsId) => {
  * from its issued/returned/expended totals.
  */
 const computeCdStatus = (issued, returned, expended) => {
-  const outstanding = Math.max(0, parseNum(issued) - parseNum(returned) - parseNum(expended))
+  const raw = parseNum(issued) - parseNum(returned) - parseNum(expended)
+  const outstanding = Math.max(0, Math.round(raw * 100) / 100)
   const status = outstanding === 0 ? 'LIQUIDATED' : 'UNLIQUIDATED'
   return { outstanding, status }
 }

@@ -55,15 +55,24 @@ export default function SubmitCashDisbursementModal({
       setFormError('Enter an amount expended and/or returned greater than zero.')
       return
     }
-    if (exp + ret > currentOutstanding) {
+    if (ret > currentOutstanding) {
       setFormError(
-        `Combined amount (₱${(exp + ret).toFixed(2)}) exceeds outstanding balance (₱${currentOutstanding.toFixed(2)}).`,
+        `Return amount (₱${ret.toFixed(2)}) cannot exceed outstanding balance (₱${currentOutstanding.toFixed(2)}).`,
+      )
+      return
+    }
+
+    const totalAccounted = exp + ret
+    if (totalAccounted < currentOutstanding - 0.01) {
+      const shortfall = currentOutstanding - totalAccounted
+      setFormError(
+        `This report only accounts for ₱${totalAccounted.toFixed(2)} of the ₱${currentOutstanding.toFixed(2)} outstanding. Enter the remaining ₱${shortfall.toFixed(2)} (as expended or returned) to fully liquidate this disbursement.`,
       )
       return
     }
 
     const result = await onSubmit({
-      id: disbursement.id,
+      disbursement,
       amount_return: ret,
       amount_expended: exp,
     })
