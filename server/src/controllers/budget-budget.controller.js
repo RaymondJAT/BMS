@@ -2,6 +2,21 @@ const { Query, Transaction, SQLQueryBuilder } = require('../database/utilities/q
 const { Budget } = require('../database/models/Budget')
 const SQL = new SQLQueryBuilder()
 
+const wrapRow = (row, model) => {
+  if (!row || !model?.cols) return row
+  const reverse = {}
+  for (const [key, dbCol] of Object.entries(model.cols)) {
+    if (dbCol !== key) reverse[dbCol] = key
+  }
+  return new Proxy(row, {
+    get(target, prop, receiver) {
+      if (prop in target) return Reflect.get(target, prop, receiver)
+      if (typeof prop === 'string' && reverse[prop] !== undefined) return target[reverse[prop]]
+      return undefined
+    },
+  })
+}
+
 /**
  * Transaction() expects an array of { sql, values }, but the query builder's
  * .build() returns { sql, bindings }. This adapts one to the other.
@@ -77,7 +92,8 @@ const upsertBudgetBudget = async (req, res) => {
         .where(Budget.Budget.pk, id)
         .build()
 
-      const [existingBudget] = await Query(existingQuery.sql, existingQuery.bindings)
+      const [existingBudgetRaw] = await Query(existingQuery.sql, existingQuery.bindings)
+      const existingBudget = wrapRow(existingBudget, Budget.Budget)
 
       if (!existingBudget) {
         return res.status(404).json({ message: 'Budget not found' })
@@ -204,11 +220,11 @@ const upsertBudgetBudget = async (req, res) => {
 
 /**
  * @name softDeleteBudget
- * @description Soft delete budget by setting status to UNAVAILABLE
+ * @description Soft delete budget by setting status to CLOSED
  */
 const softDeleteBudget = async (req, res) => {
   // #swagger.tags = ['Budget']
-  // #swagger.description = 'Soft delete budget record (sets status to UNAVAILABLE)'
+  // #swagger.description = 'Soft delete budget record (sets status to CLOSED)'
   /* 
     #swagger.parameters['id'] = {
       in: 'path',
@@ -240,7 +256,7 @@ const softDeleteBudget = async (req, res) => {
       return res.status(404).json({ message: 'Budget record not found' })
     }
 
-    return res.status(200).json({ message: 'Budget set to UNAVAILABLE (Soft deleted)' })
+    return res.status(200).json({ message: 'Budget set to CLOSED (Soft deleted)' })
   } catch (error) {
     console.error('Error in softDeleteBudget:', error)
     return res.status(500).json({ message: 'Error soft deleting Budget record' })
@@ -249,7 +265,7 @@ const softDeleteBudget = async (req, res) => {
 
 /**
  * @name getBudgetBudget
- * @description Get active Budget records (excludes UNAVAILABLE by default)
+ * @description Get active Budget records (excludes CLOSED by default)
  */
 const getBudgetBudget = async (req, res) => {
   // #swagger.tags = ['Budget']

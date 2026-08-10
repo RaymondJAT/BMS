@@ -1,0 +1,69 @@
+import { apiClient } from './axios'
+
+export const cashDisbursementApi = {
+  // Get cash disbursements
+  getAll: async (params = {}) => {
+    const response = await apiClient.get('/cash-disbursement', { params })
+    return response.data || []
+  },
+
+  // Create or Update a cash disbursement entry
+  save: async (payload) => {
+    const response = await apiClient.post('/cash-disbursement', payload)
+    return response.data
+  },
+
+  // Issue cash disbursement
+  issue: async (payload) => {
+    const response = await apiClient.post('/cash-disbursement/issue', payload)
+    return response.data
+  },
+
+  // Record cash return for unused funds
+  returnCash: async (payload) => {
+    const response = await apiClient.post('/cash-disbursement/return', payload)
+    return response.data
+  },
+
+  // Record expended expenses / liquidation details
+  recordExpended: async (payload) => {
+    const response = await apiClient.post('/cash-disbursement/expend', payload)
+    return response.data
+  },
+
+  // Reimburse cash disbursement
+  reimburse: async (payload) => {
+    const response = await apiClient.post('/cash-disbursement/reimburse', payload)
+    return response.data
+  },
+
+  // Get uploaded files
+  getFiles: async (disbursementId) => {
+    const response = await apiClient.get('/cash-disbursement/file', {
+      params: { cash_disbursement_id: disbursementId },
+    })
+    return response.data || []
+  },
+
+  // Upload or attach files to a cash disbursement
+  uploadFile: async (payload) => {
+    const response = await apiClient.post('/cash-disbursement/file', payload)
+    return response.data
+  },
+
+  // Get activity logs
+  getActivity: async (disbursementId) => {
+    const response = await apiClient.get('/cash-disbursement/activity', {
+      params: { cash_disbursement_id: disbursementId },
+    })
+    return response.data || []
+  },
+
+  // Add or record a new activity log
+  addActivity: async (payload) => {
+    const response = await apiClient.post('/cash-disbursement/activity', payload)
+    return response.data
+  },
+}
+
+export default cashDisbursementApi

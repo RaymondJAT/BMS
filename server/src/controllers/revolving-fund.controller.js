@@ -5,6 +5,21 @@ const { Budget } = require('../database/models/Budget')
 
 const SQL = new SQLQueryBuilder()
 
+const wrapRow = (row, model) => {
+  if (!row || !model?.cols) return row
+  const reverse = {}
+  for (const [key, dbCol] of Object.entries(model.cols)) {
+    if (dbCol !== key) reverse[dbCol] = key
+  }
+  return new Proxy(row, {
+    get(target, prop, receiver) {
+      if (prop in target) return Reflect.get(target, prop, receiver)
+      if (typeof prop === 'string' && reverse[prop] !== undefined) return target[reverse[prop]]
+      return undefined
+    },
+  })
+}
+
 // ==========================================
 // HELPER UTILITIES
 // ==========================================
@@ -45,7 +60,7 @@ const getBudgetById = async (id) => {
     .where(Budget.Budget.pk, id)
     .build()
   const [row] = await Query(sql, bindings)
-  return row || null
+  return wrapRow(row, Budget.Budget)
 }
 
 /**
@@ -114,7 +129,6 @@ const upsertRevolvingFund = async (req, res) => {
     liquidated,
     balance,
     status,
-    bank_account_id,
   } = req.body
 
   try {
@@ -252,6 +266,22 @@ const upsertRevolvingFund = async (req, res) => {
       const totalFundAmount =
         total_fund !== undefined ? parseNum(total_fund) : beginningAmount + addedAmount
 
+      console.log('DEBUG budgetRow:', budgetRow)
+      console.log(
+        'DEBUG amount field:',
+        budgetRow[Budget.Budget.cols.amount],
+        typeof budgetRow[Budget.Budget.cols.amount],
+      )
+      console.log('DEBUG beginningAmount:', beginningAmount, typeof beginningAmount)
+      console.log(
+        'DEBUG comparison:',
+        parseNum(budgetRow[Budget.Budget.cols.amount]),
+        '<',
+        beginningAmount,
+        '=',
+        parseNum(budgetRow[Budget.Budget.cols.amount]) < beginningAmount,
+      )
+
       if (parseNum(budgetRow[Budget.Budget.cols.amount]) < beginningAmount) {
         return res.status(400).json({ message: 'Insufficient budget amount balance.' })
       }
@@ -321,54 +351,6 @@ const upsertRevolvingFund = async (req, res) => {
               `Initial funding for Revolving Fund #${newFundId}`,
             ),
           )
-        }
-
-        if (addedAmount > 0 && bank_account_id) {
-          const yyyy = now.getFullYear()
-          const mm = String(now.getMonth() + 1).padStart(2, '0')
-
-          // Reference sequence + department name are pure reads with no
-          // side effects, safe to resolve before the batch is built.
-          const countQuery = await Query(
-            `SELECT COUNT(*) AS current_count FROM transaction WHERE t_reference_id LIKE ?`,
-            [`BA-${yyyy}-${mm}%`],
-          )
-          const currentCount = countQuery[0]?.current_count || 0
-          const sequence = `BA-${yyyy}-${mm}-${String(currentCount + 1).padStart(4, '0')}`
-
-          const deptQuery = await Query(
-            `SELECT md_description FROM master_department WHERE md_id = ?`,
-            [departmentId],
-          )
-          const departmentName = deptQuery[0]?.md_description || ''
-
-          // No model provided for `transaction` / `transaction_history` —
-          // kept as raw parameterized SQL, but still included in the same
-          // Transaction() batch below for atomicity with everything else.
-          // NOTE: the transaction row's own generated id would normally be
-          // needed for transaction_history.th_transaction_id — since that
-          // can't be resolved mid-batch either, transaction_history is
-          // intentionally left out of this automated flow. Flagging this
-          // rather than guessing: confirm whether transaction_history should
-          // be written here, and if so, this insert needs to move to its
-          // own standalone-then-batch step the same way the RF/CD inserts do.
-          queries.push({
-            sql: `INSERT INTO transaction (
-              t_bank_account_id, t_reference_id, t_type, t_category, t_description, 
-              t_from_id, t_to_id, t_amount, t_net_amount, t_gross_amount, 
-              t_datetime, t_created_by, t_updated_by, t_updated_at, t_status
-            ) VALUES (?, ?, 'DEBIT', 'Budget', ?, 1, 2, ?, ?, ?, NOW(), ?, ?, NOW(), 'Paid')`,
-            values: [
-              bank_account_id,
-              sequence,
-              `Budget allocation for ${departmentName}`,
-              addedAmount,
-              addedAmount,
-              addedAmount,
-              userId,
-              userId,
-            ],
-          })
         }
 
         if (queries.length > 0) {

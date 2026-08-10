@@ -1,33 +1,31 @@
-import React from 'react'
-import { Eye, Edit3, Send, Calendar, User, Building, AlertCircle } from 'lucide-react'
+import { Edit3, Send, Calendar, User, Building, AlertCircle } from 'lucide-react'
 
 /**
- * Cash Disbursement Columns Definition
- * Fully aligned with exact field structure:
- * ID, REVOLVING FUND, PARTICULARS, DATE ISSUED, RECEIVED BY, DEPARTMENT,
- * CASH VOUCHER, AMOUNT ISSUED, AMOUNT RETURNED, AMOUNT EXPENDED,
- * OUTSTANDING AMOUNT, STATUS, DATE LIQUIDATED, ACTIONS
+ * Cash Disbursement Columns — aligned with the real backend field names
+ * (id, date_issued, received_by, department_id, particulars, cash_voucher,
+ * amount_issued, amount_returned, amount_expended, outstanding_amount,
+ * status). received_by / department_id / particulars are all foreign key
+ * ids, resolved to display names via the lookup functions passed in.
+ *
+ * The "View" action from the original mock UI is intentionally omitted —
+ * there's no ViewCashDisbursementModal wired up on the backend side yet.
  */
-export function createDisbursementColumns({ onView, onEdit, onSubmit }) {
+export function createDisbursementColumns({
+  onEdit,
+  onSubmit,
+  getEmployeeName,
+  getDepartmentName,
+  getParticularsName,
+}) {
   return [
     {
       header: 'ID & Voucher',
-      accessorKey: 'id',
+      accessorKey: 'cash_voucher',
       sortable: true,
       cell: (row) => (
         <div className="py-0.5">
-          <p className="font-semibold text-slate-900 text-sm">{row.voucherNo || 'N/A'}</p>
-          <p className="text-[11px] text-slate-400 font-mono mt-0.5">ID: {row.id || 'N/A'}</p>
-        </div>
-      ),
-    },
-    {
-      header: 'Revolving Fund',
-      accessorKey: 'fundName',
-      sortable: true,
-      cell: (row) => (
-        <div className="py-0.5">
-          <p className="font-semibold text-slate-900 text-sm">{row.fundName || '—'}</p>
+          <p className="font-semibold text-slate-900 text-sm">{row.cash_voucher || 'N/A'}</p>
+          <p className="text-[11px] text-slate-400 font-mono mt-0.5">ID: {row.id ?? 'N/A'}</p>
         </div>
       ),
     },
@@ -35,63 +33,66 @@ export function createDisbursementColumns({ onView, onEdit, onSubmit }) {
       header: 'Purpose',
       accessorKey: 'particulars',
       sortable: true,
-      cell: (row) => (
-        <div className="py-0.5 max-w-50">
-          <p
-            className="text-xs text-slate-700 font-medium line-clamp-2 leading-snug"
-            title={row.particulars}
-          >
-            {row.particulars || '—'}
-          </p>
-        </div>
-      ),
+      cell: (row) => {
+        const label = getParticularsName(row.particulars)
+        return (
+          <div className="py-0.5 max-w-50">
+            <p
+              className="text-xs text-slate-700 font-medium line-clamp-2 leading-snug"
+              title={label}
+            >
+              {label}
+            </p>
+          </div>
+        )
+      },
     },
     {
       header: 'Payee & Department',
-      accessorKey: 'receivedBy',
+      accessorKey: 'received_by',
       sortable: true,
       cell: (row) => (
         <div className="space-y-0.5 py-0.5">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-900">
             <User className="w-3 h-3 text-slate-400 shrink-0" />
-            <span>{row.receivedBy || 'N/A'}</span>
+            <span>{getEmployeeName(row.received_by)}</span>
           </div>
-          {row.department && (
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
-              <Building className="w-3 h-3 text-slate-400 shrink-0" />
-              <span>{row.department}</span>
-            </div>
-          )}
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
+            <Building className="w-3 h-3 text-slate-400 shrink-0" />
+            <span>{getDepartmentName(row.department_id)}</span>
+          </div>
         </div>
       ),
     },
     {
-      header: 'Dates',
-      accessorKey: 'dateIssued',
-      cell: (row) => (
-        <div className="space-y-1 py-0.5">
+      header: 'Date Issued',
+      accessorKey: 'date_issued',
+      cell: (row) => {
+        const rawDate = row.date_issued
+        const formattedDate =
+          rawDate && !isNaN(new Date(rawDate).getTime())
+            ? new Date(rawDate).toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              })
+            : 'N/A'
+
+        return (
           <div className="inline-flex items-center gap-1 text-xs text-slate-600 bg-slate-50 border border-slate-200/80 px-2 py-0.5 rounded-md font-medium whitespace-nowrap">
             <Calendar className="w-3 h-3 text-slate-400" />
-            Issued: {row.dateIssued || 'N/A'}
+            {formattedDate}
           </div>
-
-          {row.dateLiquidated ? (
-            <div className="text-[11px] text-emerald-700 font-medium">
-              Liq: {row.dateLiquidated}
-            </div>
-          ) : (
-            <div className="text-[11px] text-slate-400 italic">Unliquidated</div>
-          )}
-        </div>
-      ),
+        )
+      },
     },
     {
       header: 'Disbursements Breakdown',
       align: 'right',
       cell: (row) => {
-        const issued = parseFloat(row.amountIssued || 0)
-        const expended = parseFloat(row.amountExpended || 0)
-        const returned = parseFloat(row.amountReturned || 0)
+        const issued = parseFloat(row.amount_issued || 0)
+        const expended = parseFloat(row.amount_expended || 0)
+        const returned = parseFloat(row.amount_returned || 0)
 
         return (
           <div className="space-y-0.5 py-0.5 text-right">
@@ -106,7 +107,10 @@ export function createDisbursementColumns({ onView, onEdit, onSubmit }) {
               <div className="text-[11px] text-emerald-600 font-medium">
                 Expended:{' '}
                 <span className="font-semibold">
-                  ₱{expended.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  ₱
+                  {expended.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                  })}
                 </span>
               </div>
             )}
@@ -115,7 +119,10 @@ export function createDisbursementColumns({ onView, onEdit, onSubmit }) {
               <div className="text-[11px] text-blue-600 font-medium">
                 Returned:{' '}
                 <span className="font-semibold">
-                  ₱{returned.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                  ₱
+                  {returned.toLocaleString(undefined, {
+                    minimumFractionDigits: 2,
+                  })}
                 </span>
               </div>
             )}
@@ -125,11 +132,11 @@ export function createDisbursementColumns({ onView, onEdit, onSubmit }) {
     },
     {
       header: 'Outstanding Amount',
-      accessorKey: 'outstandingAmount',
+      accessorKey: 'outstanding_amount',
       sortable: true,
       align: 'right',
       cell: (row) => {
-        const outstanding = parseFloat(row.outstandingAmount || 0)
+        const outstanding = parseFloat(row.outstanding_amount || 0)
         const isSettled = outstanding === 0
 
         return (
@@ -137,7 +144,10 @@ export function createDisbursementColumns({ onView, onEdit, onSubmit }) {
             <span
               className={`text-sm font-bold ${!isSettled ? 'text-amber-600' : 'text-slate-900'}`}
             >
-              ₱{outstanding.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              ₱
+              {outstanding.toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+              })}
             </span>
 
             {!isSettled ? (
@@ -157,19 +167,19 @@ export function createDisbursementColumns({ onView, onEdit, onSubmit }) {
       accessorKey: 'status',
       align: 'center',
       cell: (row) => {
-        const status = row.status || 'Issued'
+        // Real backend ENUM: LIQUIDATED / UNLIQUIDATED — not the mock's
+        // Issued/Liquidated/Cancelled set.
+        const status = row.status || 'UNLIQUIDATED'
 
         const statusStyles = {
-          Issued: 'bg-amber-50 text-amber-700 border-amber-200',
-          Liquidated: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-          Pending: 'bg-blue-50 text-blue-700 border-blue-200',
-          Cancelled: 'bg-slate-100 text-slate-600 border-slate-200',
+          UNLIQUIDATED: 'bg-amber-50 text-amber-700 border-amber-200',
+          LIQUIDATED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
         }
 
         return (
           <span
             className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
-              statusStyles[status] || statusStyles.Pending
+              statusStyles[status] || statusStyles.UNLIQUIDATED
             }`}
           >
             {status}
@@ -180,23 +190,12 @@ export function createDisbursementColumns({ onView, onEdit, onSubmit }) {
     {
       header: 'Actions',
       align: 'center',
-      width: 'w-24',
+      width: 'w-20',
       cell: (row) => {
-        const isClosed = row.status === 'Liquidated' || row.status === 'Cancelled'
+        const isClosed = row.status === 'LIQUIDATED'
 
         return (
           <div className="flex items-center justify-center gap-1">
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onView?.(row, e)
-              }}
-              title="View Disbursement Details"
-              className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-            >
-              <Eye className="w-4 h-4" />
-            </button>
-
             <button
               disabled={isClosed}
               onClick={(e) => {
@@ -215,7 +214,7 @@ export function createDisbursementColumns({ onView, onEdit, onSubmit }) {
                 e.stopPropagation()
                 onSubmit?.(row, e)
               }}
-              title={isClosed ? 'Disbursement settled' : 'Submit Disbursement Liquidation'}
+              title={isClosed ? 'Disbursement settled' : 'Record Return / Expended'}
               className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-30 disabled:hover:bg-transparent rounded-lg transition-colors cursor-pointer"
             >
               <Send className="w-4 h-4" />

@@ -4,6 +4,21 @@ const { Revolving } = require('../database/models/Revolving')
 const { Budget } = require('../database/models/Budget')
 const SQL = new SQLQueryBuilder()
 
+const wrapRow = (row, model) => {
+  if (!row || !model?.cols) return row
+  const reverse = {}
+  for (const [key, dbCol] of Object.entries(model.cols)) {
+    if (dbCol !== key) reverse[dbCol] = key
+  }
+  return new Proxy(row, {
+    get(target, prop, receiver) {
+      if (prop in target) return Reflect.get(target, prop, receiver)
+      if (typeof prop === 'string' && reverse[prop] !== undefined) return target[reverse[prop]]
+      return undefined
+    },
+  })
+}
+
 // ==========================================
 // HELPER UTILITIES
 // ==========================================
@@ -40,7 +55,7 @@ const getCashDisbursementById = async (id) => {
     .where(Cash.Disbursement.pk, id)
     .build()
   const [row] = await Query(sql, bindings)
-  return row || null
+  return wrapRow(row, Cash.Disbursement)
 }
 
 const getRevolvingFundById = async (id) => {
@@ -49,7 +64,7 @@ const getRevolvingFundById = async (id) => {
     .where(Revolving.Fund.pk, id)
     .build()
   const [row] = await Query(sql, bindings)
-  return row || null
+  return wrapRow(row, Revolving.Fund)
 }
 
 const getBudgetById = async (id) => {
@@ -58,7 +73,23 @@ const getBudgetById = async (id) => {
     .where(Budget.Budget.pk, id)
     .build()
   const [row] = await Query(sql, bindings)
-  return row || null
+  return wrapRow(row, Budget.Budget)
+}
+
+/**
+ * cash_disbursement_activity.cda_particulars is a free-text STRING(300)
+ * column with no FK — unlike cash_disbursement.cd_particulars, which is an
+ * FK integer to master_particulars.mpt_id. Every activity-log call site
+ * only has the id on hand, so this resolves it to master_particulars.mpt_name
+ * before insert. mpt_status (ACTIVE/INACTIVE/DELETED) is intentionally not
+ * filtered on here — an activity log should keep the historical label even
+ * if the particulars entry is later deactivated or soft-deleted.
+ */
+const getParticularsNameById = async (particularsId) => {
+  const rows = await Query(`SELECT mpt_name FROM master_particulars WHERE mpt_id = ?`, [
+    particularsId,
+  ])
+  return rows[0]?.mpt_name || null
 }
 
 /**
@@ -359,12 +390,14 @@ const issueCashDisbursement = async (req, res) => {
       const budgetRow = await getBudgetById(rf[Revolving.Fund.cols.budget_id])
       if (!budgetRow) throw new Error(`Budget ${rf[Revolving.Fund.cols.budget_id]} not found`)
 
+      const particularsName = await getParticularsNameById(particulars)
+
       const queries = [
         buildCdActivityInsert(
           newCdId,
           issueAmount,
           `Issued amount: ₱${issueAmount.toFixed(2)}`,
-          particulars,
+          particularsName,
         ),
         buildRfUpdate(revolving_fund_id, {
           [Revolving.Fund.cols.issued]: newRfIssued,
@@ -494,6 +527,8 @@ const returnCashDisbursement = async (req, res) => {
       return res.status(404).json({ message: 'Associated budget not found' })
     }
 
+    const particularsName = await getParticularsNameById(cd[Cash.Disbursement.cols.particulars])
+
     const queries = [
       buildCdUpdate(id, {
         [Cash.Disbursement.cols.amount_returned]: newReturned,
@@ -504,7 +539,7 @@ const returnCashDisbursement = async (req, res) => {
         id,
         returnAmount,
         `Returned amount: ₱${returnAmount.toFixed(2)}`,
-        cd[Cash.Disbursement.cols.particulars],
+        particularsName,
       ),
       buildRfUpdate(rf[Revolving.Fund.cols.id], {
         [Revolving.Fund.cols.returned]: newRfReturned,
@@ -613,6 +648,8 @@ const recordExpendedCashDisbursement = async (req, res) => {
       rf[Revolving.Fund.cols.total_fund],
     )
 
+    const particularsName = await getParticularsNameById(cd[Cash.Disbursement.cols.particulars])
+
     const queries = [
       buildCdUpdate(id, {
         [Cash.Disbursement.cols.amount_expended]: newExpended,
@@ -623,7 +660,7 @@ const recordExpendedCashDisbursement = async (req, res) => {
         id,
         expendedAmount,
         `Expended amount: ₱${expendedAmount.toFixed(2)}`,
-        cd[Cash.Disbursement.cols.particulars],
+        particularsName,
       ),
       buildRfUpdate(rf[Revolving.Fund.cols.id], {
         [Revolving.Fund.cols.amount_expended]: newRfExpended,
@@ -750,12 +787,14 @@ const reimburseCashDisbursement = async (req, res) => {
       const budgetRow = await getBudgetById(rf[Revolving.Fund.cols.budget_id])
       if (!budgetRow) throw new Error(`Budget ${rf[Revolving.Fund.cols.budget_id]} not found`)
 
+      const particularsName = await getParticularsNameById(particulars)
+
       const queries = [
         buildCdActivityInsert(
           newCdId,
           reimburseAmount,
           `Reimbursed amount: ₱${reimburseAmount.toFixed(2)}`,
-          particulars,
+          particularsName,
         ),
         buildRfUpdate(revolving_fund_id, {
           [Revolving.Fund.cols.issued]: newRfIssued,

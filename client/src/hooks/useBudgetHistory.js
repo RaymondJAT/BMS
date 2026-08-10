@@ -7,7 +7,6 @@ function useBudgetHistory() {
 
   const budgetId = historyModalBudget?.id
 
-  // Fetch only when budgetId is present
   const {
     data: historyLogs = [],
     isLoading: isHistoryLoading,
@@ -32,7 +31,7 @@ function useBudgetHistory() {
     historyLogs,
     isHistoryLoading,
     historyError: historyErrorObj
-      ? historyErrorObj.response?.data?.message || 'Failed to load audit history logs.'
+      ? historyErrorObj.response?.data?.message || 'Failed to load budget history.'
       : null,
     handleOpenHistoryModal,
     handleCloseHistoryModal,
