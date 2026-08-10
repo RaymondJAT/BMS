@@ -44,12 +44,15 @@ export function createRevolvingColumns({
         const startDate = row.start_date || row.startDate || '—'
         const endDate = row.end_date || row.endDate || '—'
 
+        const statusUpper = String(row.status || '').toUpperCase()
         const isClosed = Boolean(
           row.ended_date ||
           row.endedDate ||
           row.reportedDate ||
           row.submittedAt ||
-          String(row.status).toUpperCase() === 'CLOSED',
+          statusUpper === 'CLOSED' ||
+          statusUpper === 'CLEARED' ||
+          statusUpper === 'ON REVIEW',
         )
 
         return (
@@ -172,7 +175,11 @@ export function createRevolvingColumns({
           rawEnded !== undefined && rawEnded !== null ? parseFloat(rawEnded) : null
 
         const rawStatus = String(row.status || '').toUpperCase()
-        const isClosed = rawStatus === 'CLOSED' || Boolean(row.ended_date || row.endedDate)
+        const isClosed =
+          rawStatus === 'CLOSED' ||
+          rawStatus === 'CLEARED' ||
+          rawStatus === 'ON REVIEW' ||
+          Boolean(row.ended_date || row.endedDate)
         const isLow = balance < 10000 && !isClosed
 
         return (
@@ -216,6 +223,8 @@ export function createRevolvingColumns({
           active: 'bg-emerald-50 text-emerald-700 border-emerald-200',
           open: 'bg-emerald-50 text-emerald-700 border-emerald-200',
           reported: 'bg-blue-50 text-blue-700 border-blue-200',
+          'on review': 'bg-orange-50 text-orange-700 border-orange-200',
+          cleared: 'bg-teal-50 text-teal-700 border-teal-200',
           closed: 'bg-slate-100 text-slate-600 border-slate-200',
           'low balance': 'bg-amber-50 text-amber-700 border-amber-200',
         }
@@ -236,8 +245,12 @@ export function createRevolvingColumns({
       align: 'center',
       width: 'w-24',
       cell: (row) => {
+        const statusUpper = String(row.status || '').toUpperCase()
         const isClosed =
-          String(row.status).toUpperCase() === 'CLOSED' || Boolean(row.ended_date || row.endedDate)
+          statusUpper === 'CLOSED' ||
+          statusUpper === 'CLEARED' ||
+          statusUpper === 'ON REVIEW' ||
+          Boolean(row.ended_date || row.endedDate)
 
         return (
           <div className="flex items-center justify-center gap-1">
@@ -260,7 +273,7 @@ export function createRevolvingColumns({
                 e.stopPropagation()
                 onEdit?.(row, e)
               }}
-              title={isClosed ? 'Fund closed' : 'Edit Fund Details'}
+              title={isClosed ? 'Fund finalized' : 'Edit Fund Details'}
               className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 disabled:opacity-30 disabled:hover:bg-transparent rounded-lg transition-colors cursor-pointer"
             >
               <Edit3 className="w-4 h-4" />
@@ -273,7 +286,7 @@ export function createRevolvingColumns({
                 e.stopPropagation()
                 handleSubmitAction?.(row, e)
               }}
-              title={isClosed ? 'Fund closed' : 'Submit Fund Report'}
+              title={isClosed ? 'Fund finalized' : 'Submit Fund Report'}
               className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-30 disabled:hover:bg-transparent rounded-lg transition-colors cursor-pointer"
             >
               <FileCheck2 className="w-4 h-4" />
