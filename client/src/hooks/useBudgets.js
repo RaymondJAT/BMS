@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo } from 'react'
 import budgetApi from '../api/budgetApi'
 import departmentApi from '../api/departmentApi'
+import revolvingFundApi from '../api/revolvingFundApi'
 
 function useBudgets() {
   const queryClient = useQueryClient()
@@ -21,6 +22,27 @@ function useBudgets() {
     queryFn: departmentApi.getAll,
   })
 
+  // Revolving Funds are the live link between a budget and how much of it
+  // is currently deployed. A fund's outstanding amount is kept in sync by
+  // every issue/return/reimburse action on Cash Disbursement, so summing
+  // outstanding per budget_id gives an always-current "expended" figure —
+  // there's no separate column on Budget itself for this.
+  const { data: rawRevolvingFunds = [] } = useQuery({
+    queryKey: ['revolvingFunds'],
+    queryFn: () => revolvingFundApi.getAll(),
+  })
+
+  const deployedByBudget = useMemo(() => {
+    const totals = {}
+    if (!Array.isArray(rawRevolvingFunds)) return totals
+    rawRevolvingFunds.forEach((fund) => {
+      const budgetId = fund.budget_id
+      const outstanding = Number(fund.outstanding ?? 0)
+      totals[budgetId] = (totals[budgetId] || 0) + outstanding
+    })
+    return totals
+  }, [rawRevolvingFunds])
+
   const getDepartmentName = useCallback(
     (row) => {
       if (row?.department?.name) return row.department.name
@@ -38,9 +60,17 @@ function useBudgets() {
       const id = item.id ?? item.b_id
       const department_id = item.department_id ?? item.b_department_id
       const type = item.type ?? item.b_type
-      const amount = Number(item.amount ?? item.b_amount ?? 0)
+      const amount = Number(item.amount ?? item.b_amount ?? 0) // live available balance
       const status = item.status ?? item.b_status ?? 'ACTIVE'
       const departmentName = getDepartmentName({ ...item, department_id })
+
+      // "amount" is the live balance already net of anything issued to a
+      // Revolving Fund, so it represents what's AVAILABLE right now, not
+      // the total pool size. Reconstruct the total pool at this moment as
+      // available + currently deployed, so Allocated/Expended/Remaining
+      // and the Utilization bar are all internally consistent.
+      const expended = deployedByBudget[id] || 0
+      const allocated = amount + expended
 
       return {
         ...item,
@@ -49,11 +79,13 @@ function useBudgets() {
         type,
         amount,
         balance: amount, // alias so the modal's fallback chain also works
+        expended,
+        allocated,
         status,
         name: `${departmentName} — ${type}`,
       }
     })
-  }, [rawBudgets, getDepartmentName])
+  }, [rawBudgets, getDepartmentName, deployedByBudget])
 
   const deleteMutation = useMutation({
     mutationFn: (id) => budgetApi.delete(id),

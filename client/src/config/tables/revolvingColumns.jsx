@@ -2,6 +2,31 @@ import React from 'react'
 import { FileCheck2, AlertCircle, CheckCircle2, Calendar, Eye, Edit3 } from 'lucide-react'
 
 /**
+ * Helper to extract YYYY-MM-DD (Year, Month, Day) from any date representation.
+ */
+function formatDate(dateValue) {
+  if (!dateValue || dateValue === '—') return '—'
+
+  // Handle ISO strings (e.g. "2026-08-11T00:00:00.000Z") or standard dates
+  const str = String(dateValue).trim()
+  if (str.includes('T')) {
+    return str.split('T')[0]
+  }
+
+  const parsed = new Date(str)
+  if (isNaN(parsed.getTime())) {
+    return str // Fallback to raw string if unrecognized
+  }
+
+  // Format explicitly to YYYY-MM-DD
+  const year = parsed.getFullYear()
+  const month = String(parsed.getMonth() + 1).padStart(2, '0')
+  const day = String(parsed.getDate()).padStart(2, '0')
+
+  return `${year}-${month}-${day}`
+}
+
+/**
  * Professional Revolving Fund Columns Definition
  * Aligned with revolvingController backend response schema.
  *
@@ -41,8 +66,11 @@ export function createRevolvingColumns({
       header: 'Reporting Period',
       accessorKey: 'start_date',
       cell: (row) => {
-        const startDate = row.start_date || row.startDate || '—'
-        const endDate = row.end_date || row.endDate || '—'
+        const rawStartDate = row.start_date || row.startDate || '—'
+        const rawEndDate = row.end_date || row.endDate || '—'
+
+        const startDate = formatDate(rawStartDate)
+        const endDate = formatDate(rawEndDate)
 
         const statusUpper = String(row.status || '').toUpperCase()
         const isClosed = Boolean(

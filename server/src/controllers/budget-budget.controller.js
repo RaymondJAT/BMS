@@ -93,7 +93,7 @@ const upsertBudgetBudget = async (req, res) => {
         .build()
 
       const [existingBudgetRaw] = await Query(existingQuery.sql, existingQuery.bindings)
-      const existingBudget = wrapRow(existingBudget, Budget.Budget)
+      const existingBudget = wrapRow(existingBudgetRaw, Budget.Budget)
 
       if (!existingBudget) {
         return res.status(404).json({ message: 'Budget not found' })

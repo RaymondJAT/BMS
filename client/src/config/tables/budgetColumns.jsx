@@ -3,6 +3,17 @@ import { Eye, Edit2, Trash2 } from 'lucide-react'
 /**
  * Builds the DataTable column definitions for the Budget Management table.
  *
+ * Note on the money columns: budget.amount (row.amount) is a LIVE balance —
+ * it's debited when a Revolving Fund issues cash and credited when cash is
+ * returned. It represents what's AVAILABLE right now, not the original
+ * pool size. useBudgets derives:
+ *   - row.expended  = sum of `outstanding` across this budget's Revolving
+ *                     Funds (cash currently issued, not yet liquidated)
+ *   - row.allocated = row.amount + row.expended (reconstructed total pool
+ *                     at this moment)
+ * so Allocated / Expended / Remaining / Utilization all stay consistent
+ * and reflect live Revolving Fund + Cash Disbursement activity.
+ *
  * @param {Object} handlers
  * @param {(row: object) => string} handlers.getDepartmentName - resolves a department name for a budget row
  * @param {(row: object, e: Event) => void} handlers.onViewHistory
@@ -52,14 +63,14 @@ export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, 
     },
     {
       header: 'Allocated Amount',
-      accessorKey: 'amount',
+      accessorKey: 'allocated',
       sortable: true,
       align: 'right',
       cell: (row) => {
-        const amount = parseFloat(row.amount || 0)
+        const allocated = parseFloat(row.allocated || 0)
         return (
           <span className="font-semibold text-slate-900">
-            ₱{amount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            ₱{allocated.toLocaleString(undefined, { minimumFractionDigits: 2 })}
           </span>
         )
       },
@@ -80,7 +91,7 @@ export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, 
       header: 'Remaining',
       align: 'right',
       cell: (row) => {
-        const allocated = parseFloat(row.amount || 0)
+        const allocated = parseFloat(row.allocated || 0)
         const expended = parseFloat(row.expended || 0)
         const remaining = allocated - expended
         const isNegative = remaining < 0
@@ -96,7 +107,7 @@ export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, 
       header: 'Utilization',
       align: 'center',
       cell: (row) => {
-        const allocated = parseFloat(row.amount || 0)
+        const allocated = parseFloat(row.allocated || 0)
         const expended = parseFloat(row.expended || 0)
         const rawPercentage = allocated > 0 ? Math.round((expended / allocated) * 100) : 0
         const barWidth = Math.min(rawPercentage, 100)
