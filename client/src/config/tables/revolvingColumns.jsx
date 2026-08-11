@@ -1,5 +1,5 @@
 import React from 'react'
-import { FileCheck2, AlertCircle, CheckCircle2, Calendar, Eye, Edit3 } from 'lucide-react'
+import { FileCheck2, AlertCircle, CheckCircle2, Calendar, Eye, Edit3, Clock } from 'lucide-react'
 
 /**
  * Helper to extract YYYY-MM-DD (Year, Month, Day) from any date representation.
@@ -7,7 +7,6 @@ import { FileCheck2, AlertCircle, CheckCircle2, Calendar, Eye, Edit3 } from 'luc
 function formatDate(dateValue) {
   if (!dateValue || dateValue === '—') return '—'
 
-  // Handle ISO strings (e.g. "2026-08-11T00:00:00.000Z") or standard dates
   const str = String(dateValue).trim()
   if (str.includes('T')) {
     return str.split('T')[0]
@@ -15,10 +14,9 @@ function formatDate(dateValue) {
 
   const parsed = new Date(str)
   if (isNaN(parsed.getTime())) {
-    return str // Fallback to raw string if unrecognized
+    return str
   }
 
-  // Format explicitly to YYYY-MM-DD
   const year = parsed.getFullYear()
   const month = String(parsed.getMonth() + 1).padStart(2, '0')
   const day = String(parsed.getDate()).padStart(2, '0')
@@ -27,14 +25,7 @@ function formatDate(dateValue) {
 }
 
 /**
- * Professional Revolving Fund Columns Definition
- * Aligned with revolvingController backend response schema.
- *
- * getReimbursedAmount(fundId) is supplied by the page — a reimbursement is
- * a separate cash_disbursement row sharing the same cash_voucher as an
- * earlier row (see reimburseCashDisbursement), so there's no rf_reimbursed
- * column to read directly; the total is derived client-side from the
- * disbursements list and passed in as a lookup function.
+ * Professional Revolving Fund Columns Definition.
  */
 export function createRevolvingColumns({
   onView,
@@ -42,6 +33,7 @@ export function createRevolvingColumns({
   onSubmit,
   onLiquidate,
   getReimbursedAmount,
+  getFundLabel,
 }) {
   const handleSubmitAction = onSubmit || onLiquidate
 
@@ -51,7 +43,9 @@ export function createRevolvingColumns({
       accessorKey: 'name',
       sortable: true,
       cell: (row) => {
-        const fundName = row.name || row.fund_name || 'Unnamed Fund'
+        const fundName = getFundLabel
+          ? getFundLabel(row)
+          : row.name || row.fund_name || 'Unnamed Fund'
         const fundId = row.id || row.revolving_fund_id || 'N/A'
 
         return (
@@ -73,15 +67,12 @@ export function createRevolvingColumns({
         const endDate = formatDate(rawEndDate)
 
         const statusUpper = String(row.status || '').toUpperCase()
-        const isClosed = Boolean(
-          row.ended_date ||
-          row.endedDate ||
-          row.reportedDate ||
-          row.submittedAt ||
-          statusUpper === 'CLOSED' ||
-          statusUpper === 'CLEARED' ||
-          statusUpper === 'ON REVIEW',
-        )
+
+        // Report is strictly finalized ONLY when CLOSED, CLEARED, or CLEAR
+        const isFinalized =
+          statusUpper === 'CLOSED' || statusUpper === 'CLEARED' || statusUpper === 'CLEAR'
+
+        const isOnReview = statusUpper === 'ON REVIEW'
 
         return (
           <div className="space-y-1">
@@ -90,10 +81,15 @@ export function createRevolvingColumns({
               {startDate} – {endDate}
             </div>
 
-            {isClosed ? (
+            {isFinalized ? (
               <div className="text-[11px] text-emerald-700 font-medium flex items-center gap-1">
                 <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                 Report Finalized
+              </div>
+            ) : isOnReview ? (
+              <div className="text-[11px] text-amber-700 font-medium flex items-center gap-1">
+                <Clock className="w-3 h-3 text-amber-600" />
+                Pending Review
               </div>
             ) : (
               <div className="text-[11px] text-slate-400 italic">Active Cycle</div>
@@ -138,7 +134,7 @@ export function createRevolvingColumns({
         const issued = parseFloat(row.issued || 0)
         const liquidated = parseFloat(row.liquidated || 0)
         const returned = parseFloat(row.returned || row.cashReturned || 0)
-        const unliquidated = parseFloat(row.unliquidated || 0)
+        const unliquidated = Math.max(0, issued - liquidated)
         const fundId = row.id || row.revolving_fund_id
         const reimbursed = getReimbursedAmount ? getReimbursedAmount(fundId) : 0
 
@@ -206,6 +202,7 @@ export function createRevolvingColumns({
         const isClosed =
           rawStatus === 'CLOSED' ||
           rawStatus === 'CLEARED' ||
+          rawStatus === 'CLEAR' ||
           rawStatus === 'ON REVIEW' ||
           Boolean(row.ended_date || row.endedDate)
         const isLow = balance < 10000 && !isClosed
@@ -253,6 +250,7 @@ export function createRevolvingColumns({
           reported: 'bg-blue-50 text-blue-700 border-blue-200',
           'on review': 'bg-orange-50 text-orange-700 border-orange-200',
           cleared: 'bg-teal-50 text-teal-700 border-teal-200',
+          clear: 'bg-teal-50 text-teal-700 border-teal-200',
           closed: 'bg-slate-100 text-slate-600 border-slate-200',
           'low balance': 'bg-amber-50 text-amber-700 border-amber-200',
         }
@@ -274,11 +272,10 @@ export function createRevolvingColumns({
       width: 'w-24',
       cell: (row) => {
         const statusUpper = String(row.status || '').toUpperCase()
-        const isClosed =
-          statusUpper === 'CLOSED' ||
-          statusUpper === 'CLEARED' ||
-          statusUpper === 'ON REVIEW' ||
-          Boolean(row.ended_date || row.endedDate)
+
+        // Disable ONLY when the status is CLOSED or CLEARED / CLEAR
+        const isDisabled =
+          statusUpper === 'CLOSED' || statusUpper === 'CLEARED' || statusUpper === 'CLEAR'
 
         return (
           <div className="flex items-center justify-center gap-1">
@@ -296,12 +293,12 @@ export function createRevolvingColumns({
 
             <button
               type="button"
-              disabled={isClosed}
+              disabled={isDisabled}
               onClick={(e) => {
                 e.stopPropagation()
                 onEdit?.(row, e)
               }}
-              title={isClosed ? 'Fund finalized' : 'Edit Fund Details'}
+              title={isDisabled ? 'Fund finalized' : 'Edit Fund Details'}
               className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 disabled:opacity-30 disabled:hover:bg-transparent rounded-lg transition-colors cursor-pointer"
             >
               <Edit3 className="w-4 h-4" />
@@ -309,12 +306,12 @@ export function createRevolvingColumns({
 
             <button
               type="button"
-              disabled={isClosed}
+              disabled={isDisabled}
               onClick={(e) => {
                 e.stopPropagation()
                 handleSubmitAction?.(row, e)
               }}
-              title={isClosed ? 'Fund finalized' : 'Submit Fund Report'}
+              title={isDisabled ? 'Fund finalized' : 'Submit Fund Report'}
               className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 disabled:opacity-30 disabled:hover:bg-transparent rounded-lg transition-colors cursor-pointer"
             >
               <FileCheck2 className="w-4 h-4" />

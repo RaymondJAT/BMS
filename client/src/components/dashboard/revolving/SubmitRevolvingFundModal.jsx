@@ -9,7 +9,13 @@ const getLocalTodayDate = () => {
   return localDate.toISOString().split('T')[0]
 }
 
-export default function SubmitRevolvingFundModal({ fund, isOpen, onClose, onSubmitReport }) {
+export default function SubmitRevolvingFundModal({
+  fund,
+  isOpen,
+  onClose,
+  onSubmitReport,
+  getFundLabel,
+}) {
   const [reportedDate, setReportedDate] = useState(getLocalTodayDate)
   const [actualCountInput, setActualCountInput] = useState('')
   const [remarks, setRemarks] = useState('')
@@ -22,6 +28,18 @@ export default function SubmitRevolvingFundModal({ fund, isOpen, onClose, onSubm
       setRemarks('')
     }
   }, [isOpen, fund])
+
+  const fundId = fund?.id || fund?.revolving_fund_id || fund?.fund_id || 'N/A'
+
+  // Resolve display name the same way the table/View/Edit modals do —
+  // fund rows carry no name of their own, so getFundLabel derives it
+  // from the linked budget (department + fund type). Fall back only if
+  // the caller didn't wire the labeler through.
+  const fundName = useMemo(() => {
+    if (!fund) return 'Unnamed Fund'
+    if (getFundLabel) return getFundLabel(fund)
+    return fund.name || fund.fund_name || `Fund #${fundId}`
+  }, [fund, getFundLabel, fundId])
 
   // 1. Calculate Fund Financial Breakdown
   const beginningAmount = parseFloat(fund?.beginning ?? fund?.baseCap ?? fund?.base_cap ?? 0)
@@ -51,9 +69,6 @@ export default function SubmitRevolvingFundModal({ fund, isOpen, onClose, onSubm
   }, [actualCountInput, variance])
 
   if (!fund) return null
-
-  const fundId = fund.id || fund.revolving_fund_id || fund.fund_id || 'N/A'
-  const fundName = fund.name || fund.fund_name || 'Unnamed Fund'
 
   const fundTypeStr = String(fund.type || fund.fund_type || '').toLowerCase()
   const isGcashFund = fundTypeStr.includes('gcash')

@@ -24,6 +24,7 @@ import useRevolvingFunds from '../../../hooks/useRevolvingFunds'
 import useRevolvingFundForm from '../../../hooks/useRevolvingFundForm'
 import useRevolvingFundActivity from '../../../hooks/useRevolvingFundActivity'
 import useCloseRevolvingFund from '../../../hooks/useCloseRevolvingFund'
+import useEditRevolvingFund from '../../../hooks/useEditRevolvingFund'
 import useBudgets from '../../../hooks/useBudgets'
 import { useCashDisbursements } from '../../../hooks/useCashDisbursements'
 
@@ -31,7 +32,6 @@ export const Route = createFileRoute('/_authenticated/funds/revolving')({
   component: RevolvingFundPage,
 })
 
-// Helper for Currency Formatting
 const formatCurrency = (val) =>
   new Intl.NumberFormat('en-PH', {
     style: 'currency',
@@ -43,17 +43,13 @@ function RevolvingFundPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('ALL')
 
-  // Fetch budget pool options for fund creation
-  const { budgets = [], isLoading: isBudgetsLoading } = useBudgets()
+  // Fetch budget pool options for fund creation — also doubles as the
+  // lookup source for resolving each fund's display name (see getFundLabel
+  // below), since useBudgets already exposes getDepartmentName.
+  const { budgets = [], getDepartmentName, isLoading: isBudgetsLoading } = useBudgets()
 
-  // React Query / Custom Hooks
   const { funds = [], metrics = {}, isLoading, error, fetchRevolvingFunds } = useRevolvingFunds()
 
-  // Cash disbursements are fetched here too so the table can derive each
-  // fund's reimbursed total — a reimbursement is a separate cash_disbursement
-  // row sharing the same cash_voucher as an earlier row (see
-  // reimburseCashDisbursement), so there's no rf_reimbursed column to read
-  // directly off the fund; it has to be summed client-side.
   const { disbursements = [] } = useCashDisbursements()
 
   const reimbursedByFund = useMemo(() => {
@@ -73,6 +69,25 @@ function RevolvingFundPage() {
   const getReimbursedAmount = useCallback(
     (fundId) => reimbursedByFund[fundId] || 0,
     [reimbursedByFund],
+  )
+
+  /**
+   * revolving_fund rows carry only budget_id — no name of their own. This
+   * resolves each fund's display name to its budget's identity (department
+   * + fund type), the closest equivalent to a "fund name" this schema has.
+   */
+  const getFundLabel = useCallback(
+    (fundRow) => {
+      const budgetId = fundRow?.budget_id
+      const budget = budgets.find((b) => String(b.id) === String(budgetId))
+      if (!budget) return `Fund #${fundRow?.id ?? fundRow?.revolving_fund_id ?? 'N/A'}`
+
+      const deptName = getDepartmentName
+        ? getDepartmentName(budget)
+        : `Department #${budget.department_id}`
+      return budget.type ? `${deptName} — ${budget.type}` : deptName
+    },
+    [budgets, getDepartmentName],
   )
 
   const {
@@ -101,11 +116,11 @@ function RevolvingFundPage() {
     handleConfirmClose,
   } = useCloseRevolvingFund()
 
-  // Additional Modal States
+  const { saveFund, isSaving: isEditSaving } = useEditRevolvingFund()
+
   const [selectedEditFund, setSelectedEditFund] = useState(null)
   const [isEditOpen, setIsEditOpen] = useState(false)
 
-  // Action Handlers bound to table action buttons
   const handleView = useCallback(
     (row, e) => {
       handleOpenActivityModal(row, e)
@@ -130,10 +145,26 @@ function RevolvingFundPage() {
     setSelectedEditFund(null)
   }, [])
 
-  // Dynamic Search & Status Filtering
+  // Only { id, add_amount } comes out of the modal now — the backend owns
+  // computing the fund's new added/total_fund/balance from its current
+  // row plus this literal delta (see the controller's UPDATE FLOW), so
+  // there's nothing else to assemble here.
+  const handleSaveEdit = useCallback(
+    async (payload) => {
+      try {
+        await saveFund(payload)
+        handleCloseEditModal()
+      } catch {
+        // useEditRevolvingFund's onError already alerts the message; leave
+        // the modal open so the user can retry without re-entering anything.
+      }
+    },
+    [saveFund, handleCloseEditModal],
+  )
+
   const filteredFunds = useMemo(() => {
     return funds.filter((fund) => {
-      const fundName = String(fund.name || fund.fund_name || '')
+      const fundName = getFundLabel(fund)
       const fundId = String(fund.id || fund.revolving_fund_id || '')
 
       const matchesSearch =
@@ -146,9 +177,8 @@ function RevolvingFundPage() {
 
       return matchesSearch && matchesStatus
     })
-  }, [funds, searchTerm, statusFilter])
+  }, [funds, searchTerm, statusFilter, getFundLabel])
 
-  // Table Columns Definition
   const columns = useMemo(
     () =>
       createRevolvingColumns({
@@ -156,8 +186,9 @@ function RevolvingFundPage() {
         onEdit: handleEdit,
         onSubmit: handleSubmit,
         getReimbursedAmount,
+        getFundLabel,
       }),
-    [handleView, handleEdit, handleSubmit, getReimbursedAmount],
+    [handleView, handleEdit, handleSubmit, getReimbursedAmount, getFundLabel],
   )
 
   return (
@@ -331,12 +362,16 @@ function RevolvingFundPage() {
         fund={activityModalFund}
         logs={activityLogs}
         isLoading={isActivityLoading}
+        getFundLabel={getFundLabel}
       />
 
       <EditRevolvingFundModal
         isOpen={isEditOpen}
         onClose={handleCloseEditModal}
         fund={selectedEditFund}
+        onSave={handleSaveEdit}
+        isSubmitting={isEditSaving}
+        getFundLabel={getFundLabel}
       />
 
       <SubmitRevolvingFundModal
@@ -345,6 +380,7 @@ function RevolvingFundPage() {
         fund={closeModalFund}
         onSubmitReport={handleConfirmClose}
         isSubmitting={isClosing}
+        getFundLabel={getFundLabel}
       />
     </div>
   )

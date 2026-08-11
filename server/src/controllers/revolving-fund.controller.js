@@ -64,10 +64,31 @@ const getBudgetById = async (id) => {
 }
 
 /**
+ * Needed so a top-up (add_amount) can compute its delta against the
+ * fund's CURRENT added/total_fund/balance server-side, instead of trusting
+ * whatever cumulative totals the client sent — those can be stale (e.g. a
+ * second edit landing before the first one's response refreshed the UI).
+ */
+const getRevolvingFundById = async (id) => {
+  const { sql, bindings } = SQL.model(Revolving.Fund)
+    .select(Revolving.Fund.select)
+    .where(Revolving.Fund.pk, id)
+    .build()
+  const [row] = await Query(sql, bindings)
+  return wrapRow(row, Revolving.Fund)
+}
+
+/**
  * Builds the budget update + budget_history insert as Transaction-ready
  * query objects, WITHOUT executing them, using the Budget model (not raw
  * SQL) so this stays consistent with the Budget and Cash Disbursement
  * controllers' source of truth.
+ *
+ * @param {object} budgetRow - row previously fetched via getBudgetById
+ * @param {number} delta - positive to credit (increase budget), negative to
+ *   debit (decrease budget). Money DEPLOYED from the budget into a fund is
+ *   always a debit (negative); money returned to the budget is a credit
+ *   (positive). Matches the convention used in cashDisbursementController.js.
  */
 const buildBudgetChangeQueries = (budgetRow, delta, departmentId, userId, remarks) => {
   const previousAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
@@ -129,6 +150,7 @@ const upsertRevolvingFund = async (req, res) => {
     liquidated,
     balance,
     status,
+    add_amount,
   } = req.body
 
   try {
@@ -136,11 +158,7 @@ const upsertRevolvingFund = async (req, res) => {
       // ==========================================
       // UPDATE FLOW
       // ==========================================
-      const existingQuery = SQL.model(Revolving.Fund)
-        .select([Revolving.Fund.cols.id])
-        .where(Revolving.Fund.pk, id)
-        .build()
-      const [existingFund] = await Query(existingQuery.sql, existingQuery.bindings)
+      const existingFund = await getRevolvingFundById(id)
 
       if (!existingFund) {
         return res.status(404).json({ message: 'Revolving Fund not found' })
@@ -173,6 +191,59 @@ const upsertRevolvingFund = async (req, res) => {
         updateData[Revolving.Fund.cols.status] = 'ON REVIEW'
       }
 
+      // Top-up: add_amount is the literal amount being added THIS call.
+      // Computed here from the fund's current row (existingFund), not from
+      // whatever added/total_fund/balance the client sent above — so a
+      // second top-up of ₱2,000 always means "+₱2,000 from wherever the
+      // fund currently is", not "overwrite added with 2,000". This
+      // intentionally takes precedence over any raw added/total_fund/
+      // balance fields set from the request above.
+      const topUpAmount = add_amount !== undefined ? parseNum(add_amount) : 0
+      let budgetChangeQueries = []
+      let topUpRemarks = null
+
+      if (topUpAmount > 0) {
+        if (existingFund[Revolving.Fund.cols.status] === 'CLOSED') {
+          return res.status(400).json({ message: 'Cannot add funds to a closed revolving fund.' })
+        }
+
+        const newAdded = parseNum(existingFund[Revolving.Fund.cols.added]) + topUpAmount
+        const newTotalFund = parseNum(existingFund[Revolving.Fund.cols.total_fund]) + topUpAmount
+        const newBalance = parseNum(existingFund[Revolving.Fund.cols.balance]) + topUpAmount
+
+        updateData[Revolving.Fund.cols.added] = newAdded
+        updateData[Revolving.Fund.cols.total_fund] = newTotalFund
+        updateData[Revolving.Fund.cols.balance] = newBalance
+
+        const fundBudgetId = existingFund[Revolving.Fund.cols.budget_id]
+        const budgetRow = await getBudgetById(fundBudgetId)
+        if (!budgetRow) {
+          return res
+            .status(400)
+            .json({ message: `Associated budget ${fundBudgetId} not found for top-up.` })
+        }
+
+        const currentBudgetAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
+        if (currentBudgetAmount < topUpAmount) {
+          return res.status(400).json({ message: 'Insufficient budget amount balance for top-up.' })
+        }
+
+        // Deploying money from the budget into a fund DEBITS the budget
+        // (money leaves the available pool and becomes locked in the
+        // fund) — mirrors the convention used everywhere in
+        // cashDisbursementController.js (issue/reimburse debit the
+        // budget, returns credit it).
+        budgetChangeQueries = buildBudgetChangeQueries(
+          budgetRow,
+          -topUpAmount,
+          budgetRow[Budget.Budget.cols.department_id],
+          userId,
+          `Top-up for Revolving Fund #${id}`,
+        )
+
+        topUpRemarks = `Topped up ₱${topUpAmount.toFixed(2)} — added (${newAdded}), total fund (${newTotalFund}), balance (${newBalance}).`
+      }
+
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ message: 'No data provided to update' })
       }
@@ -184,22 +255,25 @@ const upsertRevolvingFund = async (req, res) => {
 
       // The RF update and its activity log both reference an id we already
       // know (no generated-id dependency), so they batch into one real,
-      // all-or-nothing transaction.
+      // all-or-nothing transaction — along with the budget effect queries
+      // when this update is a top-up.
       const queries = [toTxQuery(query)]
 
       if (Revolving.FundActivity) {
         const activityQuery = SQL.model(Revolving.FundActivity)
           .insert({
             [Revolving.FundActivity.cols.revolving_fund_id]: id,
-            [Revolving.FundActivity.cols.remarks]: `Revolving Fund updated (Status: ${
-              updateData[Revolving.Fund.cols.status] || 'N/A'
-            })`,
+            [Revolving.FundActivity.cols.remarks]:
+              topUpRemarks ||
+              `Revolving Fund updated (Status: ${updateData[Revolving.Fund.cols.status] || 'N/A'})`,
             [Revolving.FundActivity.cols.user_id]: userId,
           })
           .build()
 
         queries.push(toTxQuery(activityQuery))
       }
+
+      queries.push(...budgetChangeQueries)
 
       await Transaction(queries)
 
@@ -266,23 +340,13 @@ const upsertRevolvingFund = async (req, res) => {
       const totalFundAmount =
         total_fund !== undefined ? parseNum(total_fund) : beginningAmount + addedAmount
 
-      console.log('DEBUG budgetRow:', budgetRow)
-      console.log(
-        'DEBUG amount field:',
-        budgetRow[Budget.Budget.cols.amount],
-        typeof budgetRow[Budget.Budget.cols.amount],
-      )
-      console.log('DEBUG beginningAmount:', beginningAmount, typeof beginningAmount)
-      console.log(
-        'DEBUG comparison:',
-        parseNum(budgetRow[Budget.Budget.cols.amount]),
-        '<',
-        beginningAmount,
-        '=',
-        parseNum(budgetRow[Budget.Budget.cols.amount]) < beginningAmount,
-      )
+      // Both beginning and added leave the budget's available pool and
+      // become locked in the fund, so both must be covered by the
+      // budget's current balance — not beginning alone.
+      const deployedAmount = beginningAmount + addedAmount
+      const currentBudgetAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
 
-      if (parseNum(budgetRow[Budget.Budget.cols.amount]) < beginningAmount) {
+      if (currentBudgetAmount < deployedAmount) {
         return res.status(400).json({ message: 'Insufficient budget amount balance.' })
       }
 
@@ -341,11 +405,15 @@ const upsertRevolvingFund = async (req, res) => {
           queries.push(toTxQuery(activityQuery))
         }
 
-        if (addedAmount > 0) {
+        // Deploying money from the budget into a new fund DEBITS the
+        // budget — money leaves the available pool. Covers both the
+        // initial `beginning` balance and any `added` amount, since both
+        // represent money moving out of the budget at creation time.
+        if (deployedAmount > 0) {
           queries.push(
             ...buildBudgetChangeQueries(
               budgetRow,
-              addedAmount,
+              -deployedAmount,
               departmentId,
               userId,
               `Initial funding for Revolving Fund #${newFundId}`,

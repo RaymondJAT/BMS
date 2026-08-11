@@ -150,6 +150,7 @@ function RouteComponent() {
         isSubmitting={isSubmitting}
         departments={departments}
         selectedBudget={selectedBudget}
+        getDepartmentName={getDepartmentName}
       />
 
       {/* History Modal */}

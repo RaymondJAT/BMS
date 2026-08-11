@@ -91,17 +91,20 @@ export function useCashDisbursementLookups() {
   /**
    * revolving_fund rows only carry budget_id, not department_id directly —
    * the department comes from budget.department_id, one hop further out.
+   * Shows the budget's identity (department + fund type) as its "name" —
+   * budgets have no dedicated name field, so this pairing is the closest
+   * equivalent. No fund id suffix; that's not part of the display name.
    */
   const getFundLabel = useCallback(
     (id) => {
       const fund = revolvingFunds.find((f) => String(f.id) === String(id))
-      if (!fund) return `Fund #${id ?? 'N/A'}`
+      if (!fund) return 'Unknown Fund'
 
       const budget = budgets.find((b) => String(b.id) === String(fund.budget_id))
-      const deptName = budget ? getDepartmentName(budget.department_id) : 'Unknown Dept'
-      const fundType = budget?.type ? ` — ${budget.type}` : ''
+      if (!budget) return 'Unknown Fund'
 
-      return `${deptName}${fundType} (Fund #${fund.id})`
+      const deptName = getDepartmentName(budget.department_id)
+      return budget.type ? `${deptName} — ${budget.type}` : deptName
     },
     [revolvingFunds, budgets, getDepartmentName],
   )

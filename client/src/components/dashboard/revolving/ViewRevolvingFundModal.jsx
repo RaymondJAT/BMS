@@ -8,18 +8,24 @@ const formatCurrency = (val) =>
     minimumFractionDigits: 2,
   }).format(val || 0)
 
-export default function ViewRevolvingFundModal({ fund, isOpen, onClose }) {
+export default function ViewRevolvingFundModal({ fund, isOpen, onClose, getFundLabel }) {
   if (!fund) return null
 
+  const fundName = getFundLabel
+    ? getFundLabel(fund)
+    : fund.name || fund.fund_name || `Fund #${fund.id ?? fund.revolving_fund_id ?? 'N/A'}`
+  const fundId = fund.id || fund.revolving_fund_id || fund.fund_id || 'N/A'
   const totalCap = (fund.baseCap || 0) + (fund.replenished || 0)
+
+  // const totalCap = (fund.baseCap || 0) + (fund.replenished || 0)
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Revolving Fund Details">
       <div className="space-y-5">
         <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-100 flex items-center justify-between">
           <div>
-            <h3 className="font-bold text-slate-900 text-sm">{fund.name}</h3>
-            <span className="text-[11px] font-mono text-slate-500">{fund.id}</span>
+            <h3 className="font-bold text-slate-900 text-sm">{fundName}</h3>
+            <span className="text-[11px] font-mono text-slate-500">{fundId}</span>
           </div>
           <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
             {fund.status}

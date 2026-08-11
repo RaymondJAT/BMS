@@ -1,7 +1,6 @@
 const { Query, Transaction, SQLQueryBuilder } = require('../database/utilities/queries.util')
 const { Cash } = require('../database/models/Cash')
 const { Revolving } = require('../database/models/Revolving')
-const { Budget } = require('../database/models/Budget')
 const SQL = new SQLQueryBuilder()
 
 const wrapRow = (row, model) => {
@@ -67,15 +66,6 @@ const getRevolvingFundById = async (id) => {
   return wrapRow(row, Revolving.Fund)
 }
 
-const getBudgetById = async (id) => {
-  const { sql, bindings } = SQL.model(Budget.Budget)
-    .select(Budget.Budget.select)
-    .where(Budget.Budget.pk, id)
-    .build()
-  const [row] = await Query(sql, bindings)
-  return wrapRow(row, Budget.Budget)
-}
-
 /**
  * cash_disbursement_activity.cda_particulars is a free-text STRING(300)
  * column with no FK — unlike cash_disbursement.cd_particulars, which is an
@@ -114,44 +104,6 @@ const computeRfStatus = (currentStatus, liquidated, totalFund) => {
   if (currentStatus === 'CLOSED' || currentStatus === 'RETURN') return currentStatus
   if (parseNum(liquidated) >= parseNum(totalFund) && parseNum(totalFund) > 0) return 'CLEARED'
   return 'ON REVIEW'
-}
-
-/**
- * Builds the budget update + budget_history insert as Transaction-ready
- * query objects, WITHOUT executing them. The caller must have already
- * fetched budgetRow (e.g. via getBudgetById) so the previous amount is known.
- *
- * @param {object} budgetRow - row previously fetched via getBudgetById
- * @param {number} delta - positive to credit (increase), negative to debit (decrease)
- * @param {number} departmentId
- * @param {number} userId
- * @param {string} [remarks]
- * @returns {{sql:string, values:Array}[]} two query objects: [budgetUpdate, historyInsert]
- */
-const buildBudgetChangeQueries = (budgetRow, delta, departmentId, userId, remarks) => {
-  const previousAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
-  const newAmount = previousAmount + delta
-
-  const updateQuery = SQL.model(Budget.Budget)
-    .update({ [Budget.Budget.cols.amount]: newAmount })
-    .where(Budget.Budget.pk, budgetRow[Budget.Budget.cols.id])
-    .build()
-
-  const historyQuery = SQL.model(Budget.History)
-    .insert({
-      [Budget.History.cols.budget_id]: budgetRow[Budget.Budget.cols.id],
-      [Budget.History.cols.amount]: Math.abs(delta),
-      [Budget.History.cols.previous_amount]: previousAmount,
-      [Budget.History.cols.new_amount]: newAmount,
-      [Budget.History.cols.remarks]: remarks || null,
-      [Budget.History.cols.department_id]: departmentId,
-      [Budget.History.cols.type]: budgetRow[Budget.Budget.cols.type],
-      [Budget.History.cols.date]: new Date(),
-      [Budget.History.cols.created_by]: userId,
-    })
-    .build()
-
-  return [toTxQuery(updateQuery), toTxQuery(historyQuery)]
 }
 
 const buildCdActivityInsert = (cashDisbursementId, amount, remarks, particulars) => {
@@ -290,12 +242,17 @@ const upsertCashDisbursement = async (req, res) => {
 /**
  * @name issueCashDisbursement
  * @description Issue cash from a Revolving Fund to an employee. Creates the
- *              cash_disbursement row and cascades: revolving_fund (issued↑,
- *              outstanding↑, balance↓) and budget (debit), plus activity logs.
+ *              cash_disbursement row and cascades to revolving_fund only
+ *              (issued↑, outstanding↑, balance↓). Does NOT touch budget —
+ *              the budget was already debited when this fund was funded/
+ *              topped-up (see upsertRevolvingFund); issuing cash out of the
+ *              fund to an employee is a fund-internal move, not a new
+ *              budget-boundary crossing. Re-debiting here would double-count
+ *              the same money leaving the budget twice.
  */
 const issueCashDisbursement = async (req, res) => {
   // #swagger.tags = ['Cash Disbursement']
-  // #swagger.description = 'Issue cash against a Revolving Fund. Cascades to revolving_fund and budget.'
+  // #swagger.description = 'Issue cash against a Revolving Fund. Cascades to revolving_fund only (budget already debited when the fund was funded).'
   // #swagger.autoBody = false
   // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
   /* 
@@ -377,7 +334,7 @@ const issueCashDisbursement = async (req, res) => {
     const newCdId = cdResult.insertId
 
     // Step 2: batch everything downstream into one real transaction —
-    // activity log, RF update + activity, budget update + history.
+    // activity log, RF update + activity.
     try {
       const newRfIssued = parseNum(rf[Revolving.Fund.cols.issued]) + issueAmount
       const newRfOutstanding = parseNum(rf[Revolving.Fund.cols.outstanding]) + issueAmount
@@ -387,9 +344,6 @@ const issueCashDisbursement = async (req, res) => {
         rf[Revolving.Fund.cols.liquidated],
         rf[Revolving.Fund.cols.total_fund],
       )
-
-      const budgetRow = await getBudgetById(rf[Revolving.Fund.cols.budget_id])
-      if (!budgetRow) throw new Error(`Budget ${rf[Revolving.Fund.cols.budget_id]} not found`)
 
       const particularsName = await getParticularsNameById(particulars)
 
@@ -411,20 +365,13 @@ const issueCashDisbursement = async (req, res) => {
           `Issued ₱${issueAmount.toFixed(2)} — issued (${newRfIssued}), outstanding (${newRfOutstanding}), balance (${newRfBalance}), status: ${newRfStatus}.`,
           userId,
         ),
-        ...buildBudgetChangeQueries(
-          budgetRow,
-          -issueAmount,
-          department_id,
-          userId,
-          `Cash disbursement issued (CV ${cash_voucher})`,
-        ),
       ]
 
       await Transaction(queries)
     } catch (txError) {
       // Compensate: the CD row was committed on its own above, but the
       // downstream batch failed — remove the orphaned CD row so we don't
-      // leave a disbursement with no matching RF/budget effect.
+      // leave a disbursement with no matching RF effect.
       try {
         const { sql: delSql, bindings: delBindings } = SQL.model(Cash.Disbursement)
           .delete()
@@ -454,12 +401,15 @@ const issueCashDisbursement = async (req, res) => {
 /**
  * @name returnCashDisbursement
  * @description Record a return of unused issued cash against an existing
- *              disbursement. Cascades: revolving_fund (returned↑, liquidated↑,
- *              balance↑) and budget (credit).
+ *              disbursement. Cascades to revolving_fund only (returned↑,
+ *              liquidated↑, balance↑). Does NOT touch budget — money
+ *              returning to the fund is a fund-internal move, the mirror
+ *              image of issue; the budget's balance is only affected at
+ *              fund funding/top-up time.
  */
 const returnCashDisbursement = async (req, res) => {
   // #swagger.tags = ['Cash Disbursement']
-  // #swagger.description = 'Record a return against an existing disbursement. Cascades to revolving_fund and budget.'
+  // #swagger.description = 'Record a return against an existing disbursement. Cascades to revolving_fund only.'
   // #swagger.autoBody = false
   // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
   /* 
@@ -527,11 +477,6 @@ const returnCashDisbursement = async (req, res) => {
       rf[Revolving.Fund.cols.total_fund],
     )
 
-    const budgetRow = await getBudgetById(rf[Revolving.Fund.cols.budget_id])
-    if (!budgetRow) {
-      return res.status(404).json({ message: 'Associated budget not found' })
-    }
-
     const particularsName = await getParticularsNameById(cd[Cash.Disbursement.cols.particulars])
 
     const queries = [
@@ -558,13 +503,6 @@ const returnCashDisbursement = async (req, res) => {
         `Returned ₱${returnAmount.toFixed(2)} — returned (${newRfReturned}), liquidated (${newRfLiquidated}), balance (${newRfBalance}), outstanding (${newRfOutstanding}), status: ${newRfStatus}.`,
         userId,
       ),
-      ...buildBudgetChangeQueries(
-        budgetRow,
-        returnAmount,
-        cd[Cash.Disbursement.cols.department_id],
-        userId,
-        `Cash disbursement return (CV ${cd[Cash.Disbursement.cols.cash_voucher]})`,
-      ),
     ]
 
     await Transaction(queries)
@@ -584,13 +522,13 @@ const returnCashDisbursement = async (req, res) => {
  * @name recordExpendedCashDisbursement
  * @description Record spending against previously issued cash. Cascades:
  *              revolving_fund (amount_expended↑, liquidated↑). Does NOT
- *              touch budget — the budget was already debited at issue time;
- *              re-debiting here would double-count (this was a real bug in
- *              BMS v1's updatecash_disbursement_cv_new).
+ *              touch budget — the budget was already debited at fund
+ *              funding/top-up time; re-debiting here would double-count
+ *              (this was a real bug in BMS v1's updatecash_disbursement_cv_new).
  */
 const recordExpendedCashDisbursement = async (req, res) => {
   // #swagger.tags = ['Cash Disbursement']
-  // #swagger.description = 'Record expended amount against an existing disbursement. Cascades to revolving_fund only (budget already debited at issue).'
+  // #swagger.description = 'Record expended amount against an existing disbursement. Cascades to revolving_fund only (budget already debited when the fund was funded).'
   // #swagger.autoBody = false
   // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
   /* 
@@ -697,13 +635,15 @@ const recordExpendedCashDisbursement = async (req, res) => {
  * @name reimburseCashDisbursement
  * @description Reimburse an employee for out-of-pocket spending, modeled as
  *              a fresh disbursement that is immediately fully liquidated.
- *              Creates a new cash_disbursement row. Cascades: revolving_fund
- *              (issued↑, amount_expended↑, liquidated↑, balance↓) and
- *              budget (debit), same as an issue.
+ *              Creates a new cash_disbursement row. Cascades to
+ *              revolving_fund only (issued↑, amount_expended↑, liquidated↑,
+ *              balance↓). Does NOT touch budget, same reasoning as
+ *              issueCashDisbursement — the budget was already debited when
+ *              this fund was funded/topped-up.
  */
 const reimburseCashDisbursement = async (req, res) => {
   // #swagger.tags = ['Cash Disbursement']
-  // #swagger.description = 'Reimburse an employee (new, immediately-liquidated disbursement). Cascades to revolving_fund and budget.'
+  // #swagger.description = 'Reimburse an employee (new, immediately-liquidated disbursement). Cascades to revolving_fund only (budget already debited when the fund was funded).'
   // #swagger.autoBody = false
   // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
   /* 
@@ -789,9 +729,6 @@ const reimburseCashDisbursement = async (req, res) => {
         rf[Revolving.Fund.cols.total_fund],
       )
 
-      const budgetRow = await getBudgetById(rf[Revolving.Fund.cols.budget_id])
-      if (!budgetRow) throw new Error(`Budget ${rf[Revolving.Fund.cols.budget_id]} not found`)
-
       const particularsName = await getParticularsNameById(particulars)
 
       const queries = [
@@ -812,13 +749,6 @@ const reimburseCashDisbursement = async (req, res) => {
           revolving_fund_id,
           `Reimbursed ₱${reimburseAmount.toFixed(2)} — issued (${newRfIssued}), expended (${newRfExpended}), liquidated (${newRfLiquidated}), balance (${newRfBalance}), status: ${newRfStatus}.`,
           userId,
-        ),
-        ...buildBudgetChangeQueries(
-          budgetRow,
-          -reimburseAmount,
-          department_id,
-          userId,
-          `Cash disbursement reimbursement (CV ${cash_voucher})`,
         ),
       ]
 
