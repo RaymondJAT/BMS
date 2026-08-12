@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { ChevronDown, Layers, X } from 'lucide-react'
@@ -19,6 +20,45 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
     return initialState
   })
 
+  // Collapsed-sidebar flyout: { id, title, top, left, children } | null.
+  // Rendered through a portal so it escapes the sidebar's overflow-hidden
+  // (needed for the width-collapse animation) instead of being clipped.
+  const [flyout, setFlyout] = useState(null)
+  const closeTimeoutRef = useRef(null)
+
+  const isCollapsed = !isOpen && !isMobile
+
+  const clearCloseTimeout = () => {
+    if (closeTimeoutRef.current) {
+      clearTimeout(closeTimeoutRef.current)
+      closeTimeoutRef.current = null
+    }
+  }
+
+  const handleFlyoutOpen = useCallback(
+    (item, e) => {
+      if (!isCollapsed) return
+      clearCloseTimeout()
+      const rect = e.currentTarget.getBoundingClientRect()
+      setFlyout({
+        id: item.id,
+        title: item.title,
+        children: item.children || [],
+        top: rect.top,
+        left: rect.right + 8,
+      })
+    },
+    [isCollapsed],
+  )
+
+  const handleFlyoutCloseScheduled = useCallback(() => {
+    if (!isCollapsed) return
+    clearCloseTimeout()
+    // Small delay so the cursor can travel from the icon to the flyout
+    // panel itself without it disappearing mid-move.
+    closeTimeoutRef.current = setTimeout(() => setFlyout(null), 150)
+  }, [isCollapsed])
+
   const toggleDropdown = (key) => {
     setOpenMenus((prev) => ({
       ...prev,
@@ -31,6 +71,7 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
     if (isMobile && onCloseMobile) {
       onCloseMobile()
     }
+    setFlyout(null)
   }
 
   const currentVariant = isMobile
@@ -153,11 +194,27 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
               const isDropdownOpen = !!openMenus[item.id]
 
               return (
-                <div key={item.id}>
+                <div
+                  key={item.id}
+                  onMouseEnter={(e) => handleFlyoutOpen(item, e)}
+                  onMouseLeave={handleFlyoutCloseScheduled}
+                >
                   <button
-                    onClick={() => toggleDropdown(item.id)}
+                    onClick={(e) => {
+                      // While collapsed, children never render inline (see
+                      // the AnimatePresence guard below) — clicking opens
+                      // the flyout directly instead of silently doing
+                      // nothing, so keyboard/touch users (no hover) can
+                      // still reach the sub-items.
+                      if (isCollapsed) {
+                        handleFlyoutOpen(item, e)
+                        return
+                      }
+                      toggleDropdown(item.id)
+                    }}
                     className="group flex w-full cursor-pointer items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium text-slate-600 transition-colors duration-200 hover:bg-slate-50 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-red-500 focus-visible:outline-none"
-                    aria-expanded={isDropdownOpen}
+                    aria-expanded={isCollapsed ? flyout?.id === item.id : isDropdownOpen}
+                    aria-haspopup={isCollapsed ? 'menu' : undefined}
                   >
                     <div className="flex items-center gap-3 min-w-0">
                       <motion.div
@@ -188,7 +245,7 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
                     )}
                   </button>
 
-                  {/* Sub-items list */}
+                  {/* Inline sub-items list — expanded/mobile only */}
                   <AnimatePresence initial={false}>
                     {(isOpen || isMobile) && isDropdownOpen && (
                       <motion.div
@@ -224,6 +281,45 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
           })}
         </nav>
       </motion.aside>
+
+      {/* Collapsed-sidebar flyout — portaled to <body> so it isn't clipped
+          by the sidebar's overflow-hidden. Only ever mounted when
+          collapsed on desktop. */}
+      {isCollapsed &&
+        flyout &&
+        createPortal(
+          <div
+            style={{ position: 'fixed', top: flyout.top, left: flyout.left, zIndex: 60 }}
+            onMouseEnter={clearCloseTimeout}
+            onMouseLeave={handleFlyoutCloseScheduled}
+            className="min-w-48 rounded-xl border border-slate-200/80 bg-white p-2 shadow-lg"
+          >
+            <div className="px-2 pb-1.5 mb-1 border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+              {flyout.title}
+            </div>
+            <div className="space-y-0.5">
+              {flyout.children.length === 0 ? (
+                <p className="px-2 py-1.5 text-xs text-slate-400">No items</p>
+              ) : (
+                flyout.children.map((child) => (
+                  <Link
+                    key={child.id}
+                    to={child.to}
+                    onClick={handleLinkClick}
+                    activeProps={{ className: 'text-[#E31837] font-semibold bg-red-50' }}
+                    inactiveProps={{
+                      className: 'text-slate-600 hover:text-slate-900 hover:bg-slate-50',
+                    }}
+                    className="block rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors"
+                  >
+                    {child.title}
+                  </Link>
+                ))
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </>
   )
 }

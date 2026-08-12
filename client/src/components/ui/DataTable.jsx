@@ -12,6 +12,14 @@ const DataTable = ({
   maxHeight,
   containerClassName = '',
   scrollbarClassName = 'custom-scrollbar',
+  // APIs generally return rows in ascending insertion order (oldest
+  // first, by auto-increment id or created_at ASC). Defaulting to
+  // newest-first here means the latest entry shows up at the top without
+  // requiring the user to click a sort header first. Explicit column
+  // sorting (via handleSort) always takes priority over this default —
+  // set to false for tables where the caller's own row order should be
+  // preserved as-is.
+  newestFirst = true,
 }) => {
   const [sortColumn, setSortColumn] = useState(null)
   const [sortDirection, setSortDirection] = useState('asc')
@@ -31,7 +39,9 @@ const DataTable = ({
   }
 
   const sortedData = React.useMemo(() => {
-    if (!sortColumn) return data
+    if (!sortColumn) {
+      return newestFirst ? [...data].reverse() : data
+    }
 
     return [...data].sort((a, b) => {
       const aVal = a[sortColumn]
@@ -47,7 +57,7 @@ const DataTable = ({
 
       return sortDirection === 'asc' ? (aVal > bVal ? 1 : -1) : aVal < bVal ? 1 : -1
     })
-  }, [data, sortColumn, sortDirection])
+  }, [data, sortColumn, sortDirection, newestFirst])
 
   const getAlignmentClass = (align) => {
     switch (align) {

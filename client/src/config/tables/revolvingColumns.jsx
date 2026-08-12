@@ -134,6 +134,7 @@ export function createRevolvingColumns({
         const issued = parseFloat(row.issued || 0)
         const liquidated = parseFloat(row.liquidated || 0)
         const returned = parseFloat(row.returned || row.cashReturned || 0)
+        const expended = parseFloat(row.amount_expended ?? row.expended ?? 0)
         const unliquidated = Math.max(0, issued - liquidated)
         const fundId = row.id || row.revolving_fund_id
         const reimbursed = getReimbursedAmount ? getReimbursedAmount(fundId) : 0
@@ -153,6 +154,15 @@ export function createRevolvingColumns({
                 ₱{liquidated.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </span>
             </div>
+
+            {expended > 0 && (
+              <div className="text-[11px] text-orange-600 font-medium">
+                Expended:{' '}
+                <span className="font-semibold">
+                  ₱{expended.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            )}
 
             {returned > 0 && (
               <div className="text-[11px] text-blue-600 font-medium">
