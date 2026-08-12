@@ -3,19 +3,23 @@ import { Eye, Edit2, Trash2 } from 'lucide-react'
 /**
  * Builds the DataTable column definitions for the Budget Management table.
  *
- * Note on the money columns: budget.amount (row.amount) is a LIVE balance —
- * it's debited when a Revolving Fund issues cash and credited when cash is
- * returned. It represents what's AVAILABLE right now, not the original
- * pool size. useBudgets derives:
- *   - row.expended  = sum of `outstanding` across this budget's Revolving
- *                     Funds (cash currently issued, not yet liquidated)
- *   - row.allocated = row.amount + row.expended (reconstructed total pool
- *                     at this moment)
- * so Allocated / Expended / Remaining / Utilization all stay consistent
- * and reflect live Revolving Fund + Cash Disbursement activity.
+ * Note on the money columns: budget.amount (row.amount) is a LIVE
+ * available balance — the "wallet." It's debited when a Revolving Fund is
+ * created/topped-up, and credited only by a fresh budget top-up. It does
+ * NOT move when cash is issued/returned/reimbursed between a fund and an
+ * employee — that's fund-internal (see cashDisbursementController.js).
+ * useBudgets derives:
+ *   - row.deployedToFunds = sum of `total_fund` across this budget's
+ *     Revolving Funds (money currently locked in fund custody, whether
+ *     idle balance or out with an employee)
+ *   - row.allocated = row.amount + row.deployedToFunds (reconstructed
+ *     total pool — stays flat across disbursement activity, only moves at
+ *     fund funding/top-up time or a budget top-up)
+ * so Allocated / Deployed to Revolving Funds / Remaining / Utilization
+ * all stay internally consistent.
  *
  * @param {Object} handlers
- * @param {(row: object) => string} handlers.getDepartmentName - resolves a department name for a budget row
+ * @param {(row: object) => string} handlers.getDepartmentName
  * @param {(row: object, e: Event) => void} handlers.onViewHistory
  * @param {(row: object, e: Event) => void} handlers.onEdit
  * @param {(row: object, e: Event) => void} handlers.onDelete
@@ -76,13 +80,15 @@ export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, 
       },
     },
     {
-      header: 'Expended',
+      header: 'Deployed to Revolving Funds',
+      accessorKey: 'deployedToFunds',
+      sortable: true,
       align: 'right',
       cell: (row) => {
-        const expended = parseFloat(row.expended || 0)
+        const deployed = parseFloat(row.deployedToFunds || 0)
         return (
           <span className="font-medium text-slate-700">
-            ₱{expended.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            ₱{deployed.toLocaleString(undefined, { minimumFractionDigits: 2 })}
           </span>
         )
       },
@@ -92,8 +98,8 @@ export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, 
       align: 'right',
       cell: (row) => {
         const allocated = parseFloat(row.allocated || 0)
-        const expended = parseFloat(row.expended || 0)
-        const remaining = allocated - expended
+        const deployed = parseFloat(row.deployedToFunds || 0)
+        const remaining = allocated - deployed
         const isNegative = remaining < 0
 
         return (
@@ -108,10 +114,10 @@ export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, 
       align: 'center',
       cell: (row) => {
         const allocated = parseFloat(row.allocated || 0)
-        const expended = parseFloat(row.expended || 0)
-        const rawPercentage = allocated > 0 ? Math.round((expended / allocated) * 100) : 0
+        const deployed = parseFloat(row.deployedToFunds || 0)
+        const rawPercentage = allocated > 0 ? Math.round((deployed / allocated) * 100) : 0
         const barWidth = Math.min(rawPercentage, 100)
-        const isOver = expended > allocated
+        const isOver = deployed > allocated
 
         return (
           <div className="w-28 space-y-1">

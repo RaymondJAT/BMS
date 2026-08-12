@@ -22,11 +22,17 @@ function useBudgets() {
     queryFn: departmentApi.getAll,
   })
 
-  // Revolving Funds are the live link between a budget and how much of it
-  // is currently deployed. A fund's outstanding amount is kept in sync by
-  // every issue/return/reimburse action on Cash Disbursement, so summing
-  // outstanding per budget_id gives an always-current "expended" figure —
-  // there's no separate column on Budget itself for this.
+  // Revolving Funds are the "wallet" boundary for a budget: creating or
+  // topping up a fund DEBITS budget.amount and locks that money into the
+  // fund's own total_fund/balance (see revolvingFundController.js's
+  // upsertRevolvingFund). Once inside a fund, issuing/returning/
+  // reimbursing cash to employees (cashDisbursementController.js) is
+  // fund-internal and never touches the budget again. So "how much of
+  // this budget is currently deployed into Revolving Funds" is the SUM of
+  // each fund's total_fund — NOT `outstanding`. `outstanding` only
+  // reflects cash currently out with an employee, and using it here made
+  // this figure (and Allocated Amount below) climb every time cash was
+  // issued, even though no money actually left the budget at that moment.
   const { data: rawRevolvingFunds = [] } = useQuery({
     queryKey: ['revolvingFunds'],
     queryFn: () => revolvingFundApi.getAll(),
@@ -37,8 +43,8 @@ function useBudgets() {
     if (!Array.isArray(rawRevolvingFunds)) return totals
     rawRevolvingFunds.forEach((fund) => {
       const budgetId = fund.budget_id
-      const outstanding = Number(fund.outstanding ?? 0)
-      totals[budgetId] = (totals[budgetId] || 0) + outstanding
+      const deployed = Number(fund.total_fund ?? 0)
+      totals[budgetId] = (totals[budgetId] || 0) + deployed
     })
     return totals
   }, [rawRevolvingFunds])
@@ -60,17 +66,20 @@ function useBudgets() {
       const id = item.id ?? item.b_id
       const department_id = item.department_id ?? item.b_department_id
       const type = item.type ?? item.b_type
-      const amount = Number(item.amount ?? item.b_amount ?? 0) // live available balance
+      const amount = Number(item.amount ?? item.b_amount ?? 0) // live available balance — the "wallet"
       const status = item.status ?? item.b_status ?? 'ACTIVE'
       const departmentName = getDepartmentName({ ...item, department_id })
 
-      // "amount" is the live balance already net of anything issued to a
-      // Revolving Fund, so it represents what's AVAILABLE right now, not
-      // the total pool size. Reconstruct the total pool at this moment as
-      // available + currently deployed, so Allocated/Expended/Remaining
-      // and the Utilization bar are all internally consistent.
-      const expended = deployedByBudget[id] || 0
-      const allocated = amount + expended
+      // deployedToFunds = money currently locked inside this budget's
+      // Revolving Funds (idle fund balance + whatever's out with
+      // employees). It only changes when a fund is created/topped up —
+      // never when cash moves fund→employee or back.
+      // allocated = amount + deployedToFunds reconstructs the total pool
+      // ever allocated to this budget; it stays flat across issue/return/
+      // reimburse activity and only moves at fund funding/top-up time or
+      // a fresh budget top-up.
+      const deployedToFunds = deployedByBudget[id] || 0
+      const allocated = amount + deployedToFunds
 
       return {
         ...item,
@@ -79,7 +88,8 @@ function useBudgets() {
         type,
         amount,
         balance: amount, // alias so the modal's fallback chain also works
-        expended,
+        deployedToFunds,
+        expended: deployedToFunds, // kept as an alias in case anything else still reads `expended`
         allocated,
         status,
         name: `${departmentName} — ${type}`,
