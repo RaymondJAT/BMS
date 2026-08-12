@@ -94,17 +94,56 @@ const computeCdStatus = (issued, returned, expended) => {
 }
 
 /**
- * Recomputes a revolving_fund's status from its liquidated total vs total_fund.
- * Note: v2's revolving_fund has no rf_unliquidated column — "unliquidated"
- * is always issued - liquidated, computed on read, never stored.
- * A fund already reported/CLOSED (see closed_revolving_fund) is left alone
- * here; only OPEN / ON REVIEW / CLEARED are managed by disbursement activity.
+ * Recomputes a revolving_fund's status after a disbursement action.
+ *
+ * RETURN is a genuinely terminal state (fund fully returned/decommissioned)
+ * and is never overwritten by disbursement activity.
+ *
+ * NOTE: this function still has a currentStatus === 'CLOSED' branch below,
+ * but as of the CLOSED-fund guards added to returnCashDisbursement and
+ * recordExpendedCashDisbursement (which reject before any write happens),
+ * none of the four call sites in this file can actually reach this
+ * function with currentStatus === 'CLOSED' anymore — issue/reimburse were
+ * already blocked via NON_ISSUABLE_RF_STATUSES, and return/expend are now
+ * blocked too. The branch is kept rather than deleted only because
+ * removing it would silently change behavior if a guard is ever relaxed
+ * elsewhere; if CLOSED liquidation is intentionally re-enabled later, this
+ * is where a CLOSED → CLEARED transition would need to resume happening.
+ *
+ * "Fully liquidated" (for a fund NOT closed) is decided by
+ * newOutstanding <= 0 — the SAME metric (rf_outstanding) that
+ * upsertClosedRevolvingFund itself reads to decide CLOSED vs CLEARED when
+ * the fund is first submitted/reported, rather than comparing liquidated
+ * against total_fund (a different number that can disagree with
+ * rf_outstanding — see prior revision of this comment for the concrete
+ * example).
+ *
+ * @param {string} currentStatus
+ * @param {number} newOutstanding - the fund's rf_outstanding value AFTER
+ *   this action (issued minus liquidated across all its disbursements).
  */
-const computeRfStatus = (currentStatus, liquidated, totalFund) => {
-  if (currentStatus === 'CLOSED' || currentStatus === 'RETURN') return currentStatus
-  if (parseNum(liquidated) >= parseNum(totalFund) && parseNum(totalFund) > 0) return 'CLEARED'
+const computeRfStatus = (currentStatus, newOutstanding) => {
+  if (currentStatus === 'RETURN') return currentStatus
+
+  if (parseNum(newOutstanding) <= 0) {
+    return 'CLEARED'
+  }
+
+  if (currentStatus === 'CLOSED') return currentStatus
+
   return 'ON REVIEW'
 }
+
+/**
+ * Fund statuses that should never accept a NEW cash issuance. OPEN and
+ * ON REVIEW are the only "active" states a fund can issue cash from —
+ * CLOSED (submitted for closure, possibly still settling), CLEARED
+ * (fully settled and done), and RETURN (terminal) are all finalized in
+ * some sense and shouldn't take on new disbursement activity. Mirrors the
+ * same CLOSED guard already used in upsertRevolvingFund's top-up flow,
+ * extended here to cover the other finalized statuses too.
+ */
+const NON_ISSUABLE_RF_STATUSES = ['CLOSED', 'CLEARED', 'RETURN']
 
 const buildCdActivityInsert = (cashDisbursementId, amount, remarks, particulars) => {
   const query = SQL.model(Cash.DisbursementActivity)
@@ -249,10 +288,13 @@ const upsertCashDisbursement = async (req, res) => {
  *              fund to an employee is a fund-internal move, not a new
  *              budget-boundary crossing. Re-debiting here would double-count
  *              the same money leaving the budget twice.
+ *
+ *              Blocked entirely if the fund is CLOSED, CLEARED, or RETURN —
+ *              only OPEN / ON REVIEW funds can issue new cash.
  */
 const issueCashDisbursement = async (req, res) => {
   // #swagger.tags = ['Cash Disbursement']
-  // #swagger.description = 'Issue cash against a Revolving Fund. Cascades to revolving_fund only (budget already debited when the fund was funded).'
+  // #swagger.description = 'Issue cash against a Revolving Fund. Cascades to revolving_fund only (budget already debited when the fund was funded). Blocked if the fund is CLOSED, CLEARED, or RETURN.'
   // #swagger.autoBody = false
   // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
   /* 
@@ -304,6 +346,13 @@ const issueCashDisbursement = async (req, res) => {
       return res.status(404).json({ message: 'Revolving fund not found' })
     }
 
+    const rfStatus = rf[Revolving.Fund.cols.status]
+    if (NON_ISSUABLE_RF_STATUSES.includes(rfStatus)) {
+      return res.status(400).json({
+        message: `Cannot issue cash from a revolving fund with status ${rfStatus}.`,
+      })
+    }
+
     const currentBalance = parseNum(rf[Revolving.Fund.cols.balance])
     if (currentBalance < issueAmount) {
       return res.status(400).json({ message: 'Insufficient revolving fund balance.' })
@@ -339,11 +388,7 @@ const issueCashDisbursement = async (req, res) => {
       const newRfIssued = parseNum(rf[Revolving.Fund.cols.issued]) + issueAmount
       const newRfOutstanding = parseNum(rf[Revolving.Fund.cols.outstanding]) + issueAmount
       const newRfBalance = currentBalance - issueAmount
-      const newRfStatus = computeRfStatus(
-        rf[Revolving.Fund.cols.status],
-        rf[Revolving.Fund.cols.liquidated],
-        rf[Revolving.Fund.cols.total_fund],
-      )
+      const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfOutstanding)
 
       const particularsName = await getParticularsNameById(particulars)
 
@@ -455,6 +500,17 @@ const returnCashDisbursement = async (req, res) => {
       return res.status(404).json({ message: 'Target revolving fund not found' })
     }
 
+    // Reject entirely — no CD/RF writes at all — if the target fund is
+    // CLOSED. Checked before any computation or Transaction() call so a
+    // rejected return can never leave the CD partially liquidated, even
+    // when this call is the first of two (return, then expend) fired
+    // sequentially from the Submit Liquidation flow.
+    if (rf[Revolving.Fund.cols.status] === 'CLOSED') {
+      return res.status(400).json({
+        message: 'Cannot liquidate against a closed revolving fund.',
+      })
+    }
+
     // TODO(transaction): wrap in Transaction() — see note in issueCashDisbursement.
 
     const newReturned = currentReturned + returnAmount
@@ -471,11 +527,7 @@ const returnCashDisbursement = async (req, res) => {
       0,
       parseNum(rf[Revolving.Fund.cols.outstanding]) - returnAmount,
     )
-    const newRfStatus = computeRfStatus(
-      rf[Revolving.Fund.cols.status],
-      newRfLiquidated,
-      rf[Revolving.Fund.cols.total_fund],
-    )
+    const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfOutstanding)
 
     const particularsName = await getParticularsNameById(cd[Cash.Disbursement.cols.particulars])
 
@@ -570,6 +622,15 @@ const recordExpendedCashDisbursement = async (req, res) => {
       return res.status(404).json({ message: 'Associated revolving fund not found' })
     }
 
+    // Reject entirely — no CD/RF writes at all — if the fund is CLOSED.
+    // See the matching guard in returnCashDisbursement for why this must
+    // happen before any writes, not just before the RF status recompute.
+    if (rf[Revolving.Fund.cols.status] === 'CLOSED') {
+      return res.status(400).json({
+        message: 'Cannot liquidate against a closed revolving fund.',
+      })
+    }
+
     // TODO(transaction): wrap in Transaction() — see note in issueCashDisbursement.
 
     const newExpended = currentExpended + expendedAmount
@@ -585,11 +646,7 @@ const recordExpendedCashDisbursement = async (req, res) => {
       0,
       parseNum(rf[Revolving.Fund.cols.outstanding]) - expendedAmount,
     )
-    const newRfStatus = computeRfStatus(
-      rf[Revolving.Fund.cols.status],
-      newRfLiquidated,
-      rf[Revolving.Fund.cols.total_fund],
-    )
+    const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfOutstanding)
 
     const particularsName = await getParticularsNameById(cd[Cash.Disbursement.cols.particulars])
 
@@ -640,10 +697,14 @@ const recordExpendedCashDisbursement = async (req, res) => {
  *              balance↓). Does NOT touch budget, same reasoning as
  *              issueCashDisbursement — the budget was already debited when
  *              this fund was funded/topped-up.
+ *
+ *              Blocked entirely if the fund is CLOSED, CLEARED, or RETURN —
+ *              same guard as issueCashDisbursement, since this is modeled
+ *              as a fresh issuance against the fund.
  */
 const reimburseCashDisbursement = async (req, res) => {
   // #swagger.tags = ['Cash Disbursement']
-  // #swagger.description = 'Reimburse an employee (new, immediately-liquidated disbursement). Cascades to revolving_fund only (budget already debited when the fund was funded).'
+  // #swagger.description = 'Reimburse an employee (new, immediately-liquidated disbursement). Cascades to revolving_fund only (budget already debited when the fund was funded). Blocked if the fund is CLOSED, CLEARED, or RETURN.'
   // #swagger.autoBody = false
   // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
   /* 
@@ -691,6 +752,13 @@ const reimburseCashDisbursement = async (req, res) => {
       return res.status(404).json({ message: 'Revolving fund not found' })
     }
 
+    const rfStatus = rf[Revolving.Fund.cols.status]
+    if (NON_ISSUABLE_RF_STATUSES.includes(rfStatus)) {
+      return res.status(400).json({
+        message: `Cannot reimburse from a revolving fund with status ${rfStatus}.`,
+      })
+    }
+
     const currentBalance = parseNum(rf[Revolving.Fund.cols.balance])
     if (currentBalance < reimburseAmount) {
       return res.status(400).json({ message: 'Insufficient revolving fund balance.' })
@@ -723,10 +791,12 @@ const reimburseCashDisbursement = async (req, res) => {
       const newRfExpended = parseNum(rf[Revolving.Fund.cols.amount_expended]) + reimburseAmount
       const newRfLiquidated = parseNum(rf[Revolving.Fund.cols.liquidated]) + reimburseAmount
       const newRfBalance = currentBalance - reimburseAmount
+      // Reimbursement is issued and expended in the same step (outstanding
+      // for this CD row is 0), so it never changes the fund's own
+      // rf_outstanding total — pass it through unchanged.
       const newRfStatus = computeRfStatus(
         rf[Revolving.Fund.cols.status],
-        newRfLiquidated,
-        rf[Revolving.Fund.cols.total_fund],
+        rf[Revolving.Fund.cols.outstanding],
       )
 
       const particularsName = await getParticularsNameById(particulars)
