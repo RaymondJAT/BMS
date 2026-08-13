@@ -94,54 +94,104 @@ const computeCdStatus = (issued, returned, expended) => {
 }
 
 /**
- * Recomputes a revolving_fund's status after a disbursement action.
+ * Manages ONLY the fund's ACTIVE states (OPEN -> ON REVIEW once cash has
+ * been issued). CLOSED, CLEARED, and RETURN are all FINALIZED statuses and
+ * are never changed by THIS function — CLOSED and CLEARED are otherwise
+ * set exclusively by the explicit Submit/Report flow
+ * (upsertClosedRevolvingFund in revolvingFundController.js).
  *
- * RETURN is a genuinely terminal state (fund fully returned/decommissioned)
- * and is never overwritten by disbursement activity.
- *
- * NOTE: this function still has a currentStatus === 'CLOSED' branch below,
- * but as of the CLOSED-fund guards added to returnCashDisbursement and
- * recordExpendedCashDisbursement (which reject before any write happens),
- * none of the four call sites in this file can actually reach this
- * function with currentStatus === 'CLOSED' anymore — issue/reimburse were
- * already blocked via NON_ISSUABLE_RF_STATUSES, and return/expend are now
- * blocked too. The branch is kept rather than deleted only because
- * removing it would silently change behavior if a guard is ever relaxed
- * elsewhere; if CLOSED liquidation is intentionally re-enabled later, this
- * is where a CLOSED → CLEARED transition would need to resume happening.
- *
- * "Fully liquidated" (for a fund NOT closed) is decided by
- * newOutstanding <= 0 — the SAME metric (rf_outstanding) that
- * upsertClosedRevolvingFund itself reads to decide CLOSED vs CLEARED when
- * the fund is first submitted/reported, rather than comparing liquidated
- * against total_fund (a different number that can disagree with
- * rf_outstanding — see prior revision of this comment for the concrete
- * example).
+ * The ONE exception — a CLOSED fund auto-advancing to CLEARED once its
+ * last outstanding disbursement is settled — is NOT handled here. That
+ * transition is decided by resolveClosedFundStatus() below, which callers
+ * use INSTEAD of this function whenever the fund they're updating is
+ * currently CLOSED. This function is only ever called for funds that are
+ * OPEN / ON REVIEW / CLEARED / RETURN.
  *
  * @param {string} currentStatus
- * @param {number} newOutstanding - the fund's rf_outstanding value AFTER
- *   this action (issued minus liquidated across all its disbursements).
+ * @param {number} issued - the fund's rf_issued total AFTER this action.
  */
-const computeRfStatus = (currentStatus, newOutstanding) => {
-  if (currentStatus === 'RETURN') return currentStatus
-
-  if (parseNum(newOutstanding) <= 0) {
-    return 'CLEARED'
+const computeRfStatus = (currentStatus, issued) => {
+  if (currentStatus === 'CLOSED' || currentStatus === 'CLEARED' || currentStatus === 'RETURN') {
+    return currentStatus
   }
-
-  if (currentStatus === 'CLOSED') return currentStatus
-
-  return 'ON REVIEW'
+  return parseNum(issued) > 0 ? 'ON REVIEW' : currentStatus
 }
 
 /**
- * Fund statuses that should never accept a NEW cash issuance. OPEN and
- * ON REVIEW are the only "active" states a fund can issue cash from —
- * CLOSED (submitted for closure, possibly still settling), CLEARED
- * (fully settled and done), and RETURN (terminal) are all finalized in
- * some sense and shouldn't take on new disbursement activity. Mirrors the
- * same CLOSED guard already used in upsertRevolvingFund's top-up flow,
- * extended here to cover the other finalized statuses too.
+ * True if the given fund has any UNLIQUIDATED cash_disbursement rows
+ * OTHER than the one currently being settled. Checked directly against
+ * cash_disbursement rather than trusting the fund's own rf_outstanding
+ * aggregate, so a drifted/stale aggregate can never wrongly flip a fund
+ * to CLEARED while a real disbursement against it is still open.
+ *
+ * @param {number|string} fundId
+ * @param {number|string} excludeCdId - the disbursement being settled in
+ *   this same call; its OLD (pre-update) status may still read
+ *   UNLIQUIDATED in the DB at the moment this query runs, so it must be
+ *   excluded explicitly rather than relying on a fresh row read.
+ */
+const hasOtherUnliquidatedDisbursements = async (fundId, excludeCdId) => {
+  const { sql, bindings } = SQL.model(Cash.Disbursement)
+    .select([Cash.Disbursement.cols.id])
+    .where(Cash.Disbursement.cols.revolving_fund_id, fundId)
+    .where(Cash.Disbursement.cols.status, 'UNLIQUIDATED')
+    .build()
+  const rows = await Query(sql, bindings)
+  return rows.some((r) => String(r[Cash.Disbursement.cols.id]) !== String(excludeCdId))
+}
+
+/**
+ * Decides whether a CLOSED fund should auto-transition to CLEARED as part
+ * of a settlement (return or expended) landing on it. This is the ONLY
+ * place a CLOSED fund can become CLEARED outside the manual Submit/Report
+ * flow (upsertClosedRevolvingFund) — and it only ever fires CLOSED ->
+ * CLEARED, never any other transition. Callers must only invoke this when
+ * the fund's CURRENT status is already CLOSED; for any other status, use
+ * computeRfStatus instead.
+ *
+ * Requires ALL of:
+ *   1. This settlement brought the fund's own rf_outstanding to 0, AND
+ *   2. The disbursement being settled right now is itself fully
+ *      LIQUIDATED by this action (a partial return/expended that leaves
+ *      it UNLIQUIDATED can't clear the fund), AND
+ *   3. No OTHER cash_disbursement row against this fund is still
+ *      UNLIQUIDATED — checked directly against the table (see
+ *      hasOtherUnliquidatedDisbursements) rather than trusting
+ *      rf_outstanding alone.
+ *
+ * @param {string} currentStatus - must be 'CLOSED' (asserted by caller)
+ * @param {number} newOutstanding - fund's rf_outstanding AFTER this action
+ * @param {number|string} fundId
+ * @param {number|string} settlingCdId - the cash_disbursement.id being settled
+ * @param {string} settlingCdNewStatus - that disbursement's status AFTER this action
+ */
+const resolveClosedFundStatus = async (
+  currentStatus,
+  newOutstanding,
+  fundId,
+  settlingCdId,
+  settlingCdNewStatus,
+) => {
+  if (currentStatus !== 'CLOSED') return currentStatus
+
+  if (newOutstanding > 0 || settlingCdNewStatus !== 'LIQUIDATED') {
+    return 'CLOSED'
+  }
+
+  const stillUnliquidated = await hasOtherUnliquidatedDisbursements(fundId, settlingCdId)
+  return stillUnliquidated ? 'CLOSED' : 'CLEARED'
+}
+
+/**
+ * Fund statuses that should never accept a NEW cash issuance (issue) or a
+ * NEW reimbursement (which is modeled as a fresh issuance). OPEN and
+ * ON REVIEW are the only "active" states a fund can issue NEW cash from.
+ *
+ * This deliberately does NOT apply to settling an EXISTING disbursement's
+ * amount_expended (recordExpendedCashDisbursement) — that's allowed
+ * against a CLOSED fund on purpose, since it's not new money leaving
+ * anywhere, just marking already-issued cash as spent. See that
+ * function's docstring.
  */
 const NON_ISSUABLE_RF_STATUSES = ['CLOSED', 'CLEARED', 'RETURN']
 
@@ -388,7 +438,7 @@ const issueCashDisbursement = async (req, res) => {
       const newRfIssued = parseNum(rf[Revolving.Fund.cols.issued]) + issueAmount
       const newRfOutstanding = parseNum(rf[Revolving.Fund.cols.outstanding]) + issueAmount
       const newRfBalance = currentBalance - issueAmount
-      const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfOutstanding)
+      const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfIssued)
 
       const particularsName = await getParticularsNameById(particulars)
 
@@ -446,21 +496,42 @@ const issueCashDisbursement = async (req, res) => {
 /**
  * @name returnCashDisbursement
  * @description Record a return of unused issued cash against an existing
- *              disbursement. Cascades to revolving_fund only (returned↑,
- *              liquidated↑, balance↑). Does NOT touch budget — money
- *              returning to the fund is a fund-internal move, the mirror
- *              image of issue; the budget's balance is only affected at
- *              fund funding/top-up time.
+ *              disbursement. Does NOT touch budget — money returning to a
+ *              fund is a fund-internal move; the budget's balance is only
+ *              affected at fund funding/top-up time.
+ *
+ *              Distinguishes two funds, which may differ:
+ *                - ORIGINAL fund (cash_disbursement.revolving_fund_id) —
+ *                  the fund the disbursement was CREATED under. This is
+ *                  NEVER changed by this function. It owns the AR for this
+ *                  disbursement, so its `outstanding`/`liquidated` totals
+ *                  are what get settled here, even if it's since gone
+ *                  CLOSED (CLOSED alone must never block a liquidation —
+ *                  see the status check below, which only ever looks at
+ *                  the SELECTED fund). If this settlement brings the
+ *                  original fund's outstanding to 0 with nothing else
+ *                  UNLIQUIDATED left against it, it auto-advances
+ *                  CLOSED -> CLEARED (see resolveClosedFundStatus).
+ *                - SELECTED/liquidation fund (`revolving_fund_id` in the
+ *                  request body, defaults to the original fund) — the fund
+ *                  that actually receives the returned cash. Must be
+ *                  OPEN/ON REVIEW; its `returned`/`balance` totals go up.
+ *
+ *              When original and selected are the SAME fund, both effects
+ *              land on the same row (identical to the old behavior) — and
+ *              since that fund passed the CLOSED check above to get here,
+ *              it can never itself be CLOSED at this point, so the normal
+ *              computeRfStatus path is always correct for that branch.
  */
 const returnCashDisbursement = async (req, res) => {
   // #swagger.tags = ['Cash Disbursement']
-  // #swagger.description = 'Record a return against an existing disbursement. Cascades to revolving_fund only.'
+  // #swagger.description = 'Record a return against an existing disbursement. Target fund defaults to the disbursement'\''s own (original) fund but may be redirected to a different, OPEN/ON REVIEW fund via revolving_fund_id — the original fund association on the disbursement itself never changes. If this fully settles a CLOSED original fund, it auto-advances to CLEARED.'
   // #swagger.autoBody = false
   // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
   /* 
     #swagger.parameters['id'] = { in: 'formData', type: 'integer', required: true, description: 'Cash disbursement id' }
     #swagger.parameters['amount_return'] = { in: 'formData', type: 'number', required: true, description: 'Amount being returned' }
-    #swagger.parameters['revolving_fund_id'] = { in: 'formData', type: 'integer', required: false, description: 'Fund to credit the return to — defaults to the disbursement\'s own fund' }
+    #swagger.parameters['revolving_fund_id'] = { in: 'formData', type: 'integer', required: false, description: 'Fund to credit the return to — defaults to the disbursement\'s own (original) fund. Must be OPEN/ON REVIEW.' }
   */
 
   const userId = req.userId || req.user?.id || 1
@@ -492,26 +563,31 @@ const returnCashDisbursement = async (req, res) => {
       })
     }
 
-    // Credit target defaults to the disbursement's own fund, but the caller
-    // may choose a different fund to receive the returned cash.
-    const targetFundId = revolving_fund_id || cd[Cash.Disbursement.cols.revolving_fund_id]
-    const rf = await getRevolvingFundById(targetFundId)
-    if (!rf) {
+    // ORIGINAL/creation fund — never changes, kept purely for AR settlement.
+    const originalFundId = cd[Cash.Disbursement.cols.revolving_fund_id]
+    // SELECTED/liquidation fund — what the caller chose to credit; defaults
+    // to the original fund when not explicitly overridden.
+    const targetFundId = revolving_fund_id || originalFundId
+    const isCrossFundReturn = String(targetFundId) !== String(originalFundId)
+
+    const targetFund = await getRevolvingFundById(targetFundId)
+    if (!targetFund) {
       return res.status(404).json({ message: 'Target revolving fund not found' })
     }
 
-    // Reject entirely — no CD/RF writes at all — if the target fund is
-    // CLOSED. Checked before any computation or Transaction() call so a
-    // rejected return can never leave the CD partially liquidated, even
-    // when this call is the first of two (return, then expend) fired
-    // sequentially from the Submit Liquidation flow.
-    if (rf[Revolving.Fund.cols.status] === 'CLOSED') {
+    // Validation is ONLY against the SELECTED fund. The disbursement's
+    // original fund is allowed to be CLOSED — that status alone must never
+    // block this liquidation, as long as the selected fund is eligible.
+    if (targetFund[Revolving.Fund.cols.status] === 'CLOSED') {
       return res.status(400).json({
         message: 'Cannot liquidate against a closed revolving fund.',
       })
     }
 
-    // TODO(transaction): wrap in Transaction() — see note in issueCashDisbursement.
+    const originalFund = isCrossFundReturn ? await getRevolvingFundById(originalFundId) : targetFund
+    if (!originalFund) {
+      return res.status(404).json({ message: 'Original revolving fund not found' })
+    }
 
     const newReturned = currentReturned + returnAmount
     const { outstanding: newOutstanding, status: newCdStatus } = computeCdStatus(
@@ -519,15 +595,6 @@ const returnCashDisbursement = async (req, res) => {
       newReturned,
       currentExpended,
     )
-
-    const newRfReturned = parseNum(rf[Revolving.Fund.cols.returned]) + returnAmount
-    const newRfLiquidated = parseNum(rf[Revolving.Fund.cols.liquidated]) + returnAmount
-    const newRfBalance = parseNum(rf[Revolving.Fund.cols.balance]) + returnAmount
-    const newRfOutstanding = Math.max(
-      0,
-      parseNum(rf[Revolving.Fund.cols.outstanding]) - returnAmount,
-    )
-    const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfOutstanding)
 
     const particularsName = await getParticularsNameById(cd[Cash.Disbursement.cols.particulars])
 
@@ -543,19 +610,103 @@ const returnCashDisbursement = async (req, res) => {
         `Returned amount: ₱${returnAmount.toFixed(2)}`,
         particularsName,
       ),
-      buildRfUpdate(rf[Revolving.Fund.cols.id], {
-        [Revolving.Fund.cols.returned]: newRfReturned,
-        [Revolving.Fund.cols.liquidated]: newRfLiquidated,
-        [Revolving.Fund.cols.balance]: newRfBalance,
-        [Revolving.Fund.cols.outstanding]: newRfOutstanding,
-        [Revolving.Fund.cols.status]: newRfStatus,
-      }),
-      buildRfActivityInsert(
-        rf[Revolving.Fund.cols.id],
-        `Returned ₱${returnAmount.toFixed(2)} — returned (${newRfReturned}), liquidated (${newRfLiquidated}), balance (${newRfBalance}), outstanding (${newRfOutstanding}), status: ${newRfStatus}.`,
-        userId,
-      ),
     ]
+
+    if (!isCrossFundReturn) {
+      // Same fund owns both the AR and receives the cash. It already
+      // passed the "not CLOSED" check above to get here, so it can never
+      // be CLOSED at this point — computeRfStatus is always correct,
+      // identical to the pre-cross-fund-fix behavior.
+      const newRfReturned = parseNum(targetFund[Revolving.Fund.cols.returned]) + returnAmount
+      const newRfLiquidated = parseNum(targetFund[Revolving.Fund.cols.liquidated]) + returnAmount
+      const newRfBalance = parseNum(targetFund[Revolving.Fund.cols.balance]) + returnAmount
+      const newRfOutstanding = Math.max(
+        0,
+        parseNum(targetFund[Revolving.Fund.cols.outstanding]) - returnAmount,
+      )
+      const newRfStatus = computeRfStatus(
+        targetFund[Revolving.Fund.cols.status],
+        targetFund[Revolving.Fund.cols.issued],
+      )
+
+      queries.push(
+        buildRfUpdate(targetFundId, {
+          [Revolving.Fund.cols.returned]: newRfReturned,
+          [Revolving.Fund.cols.liquidated]: newRfLiquidated,
+          [Revolving.Fund.cols.balance]: newRfBalance,
+          [Revolving.Fund.cols.outstanding]: newRfOutstanding,
+          [Revolving.Fund.cols.status]: newRfStatus,
+        }),
+        buildRfActivityInsert(
+          targetFundId,
+          `Returned ₱${returnAmount.toFixed(2)} — returned (${newRfReturned}), liquidated (${newRfLiquidated}), balance (${newRfBalance}), outstanding (${newRfOutstanding}), status: ${newRfStatus}.`,
+          userId,
+        ),
+      )
+    } else {
+      // Cross-fund return: settle the AR on the ORIGINAL fund (the fund
+      // that actually issued this money — its outstanding/liquidated must
+      // reflect this settlement so it can transition to CLEARED), and land
+      // the physical cash on the SELECTED fund (returned/balance only —
+      // this money was never part of that fund's own issued/outstanding).
+      //
+      // Unlike the target fund, the ORIGINAL fund was never validated as
+      // "not CLOSED" — it's exactly the fund this whole flow exists to
+      // unblock. So its new status must go through resolveClosedFundStatus
+      // whenever it's currently CLOSED, to catch the "this was the last
+      // unliquidated disbursement" case and auto-advance it to CLEARED.
+      const newOriginalOutstanding = Math.max(
+        0,
+        parseNum(originalFund[Revolving.Fund.cols.outstanding]) - returnAmount,
+      )
+      const newOriginalLiquidated =
+        parseNum(originalFund[Revolving.Fund.cols.liquidated]) + returnAmount
+      const originalStatus = originalFund[Revolving.Fund.cols.status]
+      const newOriginalStatus =
+        originalStatus === 'CLOSED'
+          ? await resolveClosedFundStatus(
+              originalStatus,
+              newOriginalOutstanding,
+              originalFundId,
+              id,
+              newCdStatus,
+            )
+          : computeRfStatus(originalStatus, originalFund[Revolving.Fund.cols.issued])
+
+      const newTargetReturned = parseNum(targetFund[Revolving.Fund.cols.returned]) + returnAmount
+      const newTargetBalance = parseNum(targetFund[Revolving.Fund.cols.balance]) + returnAmount
+      const newTargetStatus = computeRfStatus(
+        targetFund[Revolving.Fund.cols.status],
+        targetFund[Revolving.Fund.cols.issued],
+      )
+
+      const didAutoClear = originalStatus === 'CLOSED' && newOriginalStatus === 'CLEARED'
+
+      queries.push(
+        buildRfUpdate(originalFundId, {
+          [Revolving.Fund.cols.outstanding]: newOriginalOutstanding,
+          [Revolving.Fund.cols.liquidated]: newOriginalLiquidated,
+          [Revolving.Fund.cols.status]: newOriginalStatus,
+        }),
+        buildRfUpdate(targetFundId, {
+          [Revolving.Fund.cols.returned]: newTargetReturned,
+          [Revolving.Fund.cols.balance]: newTargetBalance,
+          [Revolving.Fund.cols.status]: newTargetStatus,
+        }),
+        buildRfActivityInsert(
+          originalFundId,
+          didAutoClear
+            ? `Fully liquidated via a return credited to Fund #${targetFundId} — no remaining unliquidated disbursements. Status: CLOSED → CLEARED.`
+            : `₱${returnAmount.toFixed(2)} of this fund's outstanding settled via a return credited to Fund #${targetFundId} — outstanding (${newOriginalOutstanding}), liquidated (${newOriginalLiquidated}), status: ${newOriginalStatus}.`,
+          userId,
+        ),
+        buildRfActivityInsert(
+          targetFundId,
+          `Received ₱${returnAmount.toFixed(2)} return for a disbursement originally issued from Fund #${originalFundId} — returned (${newTargetReturned}), balance (${newTargetBalance}).`,
+          userId,
+        ),
+      )
+    }
 
     await Transaction(queries)
 
@@ -577,10 +728,24 @@ const returnCashDisbursement = async (req, res) => {
  *              touch budget — the budget was already debited at fund
  *              funding/top-up time; re-debiting here would double-count
  *              (this was a real bug in BMS v1's updatecash_disbursement_cv_new).
+ *
+ *              Always posts against the disbursement's OWN fund (there is
+ *              no revolving_fund_id override here, unlike return/reimburse)
+ *              — settling an already-issued amount as spent doesn't move
+ *              any new money anywhere, so it's INTENTIONALLY allowed even
+ *              when that fund's status is CLOSED. A closed fund can still
+ *              have its disbursements liquidated; only issuing brand-new
+ *              cash (issueCashDisbursement/reimburseCashDisbursement) or
+ *              crediting a return into a closed fund (returnCashDisbursement)
+ *              are blocked.
+ *
+ *              If this settlement brings a CLOSED fund's outstanding to 0
+ *              with nothing else UNLIQUIDATED left against it, the fund
+ *              auto-advances CLOSED -> CLEARED (see resolveClosedFundStatus).
  */
 const recordExpendedCashDisbursement = async (req, res) => {
   // #swagger.tags = ['Cash Disbursement']
-  // #swagger.description = 'Record expended amount against an existing disbursement. Cascades to revolving_fund only (budget already debited when the fund was funded).'
+  // #swagger.description = 'Record expended amount against an existing disbursement. Cascades to revolving_fund only (budget already debited when the fund was funded). Always posts to the disbursement'\''s own fund, even if that fund is CLOSED — settling existing debt is allowed regardless of fund status, and if it fully settles a CLOSED fund, that fund auto-advances to CLEARED.'
   // #swagger.autoBody = false
   // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
   /* 
@@ -622,14 +787,9 @@ const recordExpendedCashDisbursement = async (req, res) => {
       return res.status(404).json({ message: 'Associated revolving fund not found' })
     }
 
-    // Reject entirely — no CD/RF writes at all — if the fund is CLOSED.
-    // See the matching guard in returnCashDisbursement for why this must
-    // happen before any writes, not just before the RF status recompute.
-    if (rf[Revolving.Fund.cols.status] === 'CLOSED') {
-      return res.status(400).json({
-        message: 'Cannot liquidate against a closed revolving fund.',
-      })
-    }
+    // Deliberately NO status guard here — see docstring above. Settling
+    // amount_expended must always be allowed against the disbursement's
+    // own fund, CLOSED or not.
 
     // TODO(transaction): wrap in Transaction() — see note in issueCashDisbursement.
 
@@ -646,7 +806,26 @@ const recordExpendedCashDisbursement = async (req, res) => {
       0,
       parseNum(rf[Revolving.Fund.cols.outstanding]) - expendedAmount,
     )
-    const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfOutstanding)
+
+    // This fund was never validated as "not CLOSED" (unlike the target
+    // fund in returnCashDisbursement) — settling against a CLOSED fund is
+    // exactly what this function is for. So its new status must go
+    // through resolveClosedFundStatus whenever it's currently CLOSED, to
+    // catch "this was the last unliquidated disbursement" and auto-advance
+    // it to CLEARED; otherwise the normal computeRfStatus path applies.
+    const rfStatus = rf[Revolving.Fund.cols.status]
+    const newRfStatus =
+      rfStatus === 'CLOSED'
+        ? await resolveClosedFundStatus(
+            rfStatus,
+            newRfOutstanding,
+            rf[Revolving.Fund.cols.id],
+            id,
+            newCdStatus,
+          )
+        : computeRfStatus(rfStatus, rf[Revolving.Fund.cols.issued])
+
+    const didAutoClear = rfStatus === 'CLOSED' && newRfStatus === 'CLEARED'
 
     const particularsName = await getParticularsNameById(cd[Cash.Disbursement.cols.particulars])
 
@@ -670,7 +849,9 @@ const recordExpendedCashDisbursement = async (req, res) => {
       }),
       buildRfActivityInsert(
         rf[Revolving.Fund.cols.id],
-        `Expended ₱${expendedAmount.toFixed(2)} — expended (${newRfExpended}), liquidated (${newRfLiquidated}), outstanding (${newRfOutstanding}), status: ${newRfStatus}.`,
+        didAutoClear
+          ? `Fully liquidated via an expended settlement — no remaining unliquidated disbursements. Status: CLOSED → CLEARED.`
+          : `Expended ₱${expendedAmount.toFixed(2)} — expended (${newRfExpended}), liquidated (${newRfLiquidated}), outstanding (${newRfOutstanding}), status: ${newRfStatus}.`,
         userId,
       ),
     ]
@@ -700,7 +881,10 @@ const recordExpendedCashDisbursement = async (req, res) => {
  *
  *              Blocked entirely if the fund is CLOSED, CLEARED, or RETURN —
  *              same guard as issueCashDisbursement, since this is modeled
- *              as a fresh issuance against the fund.
+ *              as a fresh issuance against the fund. The caller selects
+ *              which fund to reimburse from via revolving_fund_id, so — same
+ *              as returnCashDisbursement — this can be redirected to a
+ *              different, active fund when the original is CLOSED.
  */
 const reimburseCashDisbursement = async (req, res) => {
   // #swagger.tags = ['Cash Disbursement']
@@ -791,13 +975,7 @@ const reimburseCashDisbursement = async (req, res) => {
       const newRfExpended = parseNum(rf[Revolving.Fund.cols.amount_expended]) + reimburseAmount
       const newRfLiquidated = parseNum(rf[Revolving.Fund.cols.liquidated]) + reimburseAmount
       const newRfBalance = currentBalance - reimburseAmount
-      // Reimbursement is issued and expended in the same step (outstanding
-      // for this CD row is 0), so it never changes the fund's own
-      // rf_outstanding total — pass it through unchanged.
-      const newRfStatus = computeRfStatus(
-        rf[Revolving.Fund.cols.status],
-        rf[Revolving.Fund.cols.outstanding],
-      )
+      const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfIssued)
 
       const particularsName = await getParticularsNameById(particulars)
 

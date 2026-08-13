@@ -1,9 +1,24 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Modal } from '../../ui/Modal'
 
+const ELIGIBLE_LIQUIDATION_STATUSES = ['OPEN', 'ON REVIEW']
+
 /**
  * Records a return and/or expended amount against an existing disbursement.
  * Automates Return vs. Reimbursement calculations based on Amount Expended vs Amount Issued.
+ *
+ * The "Target Revolving Fund" here is the LIQUIDATION fund — where a return
+ * or reimbursement gets credited — which may differ from the disbursement's
+ * ORIGINAL fund (the one it was issued from). The original fund keeps its
+ * own association untouched no matter what's picked here (see
+ * returnCashDisbursement/reimburseCashDisbursement in the backend): this
+ * modal only ever supplies revolving_fund_id as the liquidation target, it
+ * never changes which fund the disbursement was created under. Only
+ * eligible (OPEN / ON REVIEW) funds are offered, since a CLOSED fund can't
+ * receive a return or issue a reimbursement — the disbursement's original
+ * fund is allowed to be CLOSED (that's exactly the case this list excludes
+ * it for the liquidation target while amount_expended still always posts
+ * back to it regardless of its status).
  */
 export default function SubmitCashDisbursementModal({
   isOpen,
@@ -18,14 +33,42 @@ export default function SubmitCashDisbursementModal({
   const [amountExpended, setAmountExpended] = useState('')
   const [formError, setFormError] = useState(null)
 
+  const eligibleFunds = useMemo(
+    () =>
+      revolvingFunds.filter((fund) =>
+        ELIGIBLE_LIQUIDATION_STATUSES.includes(String(fund.status || '').toUpperCase()),
+      ),
+    [revolvingFunds],
+  )
+
+  const originalFund = useMemo(
+    () =>
+      disbursement
+        ? revolvingFunds.find((f) => String(f.id) === String(disbursement.revolving_fund_id))
+        : null,
+    [revolvingFunds, disbursement],
+  )
+
+  const isOriginalFundEligible = originalFund
+    ? ELIGIBLE_LIQUIDATION_STATUSES.includes(String(originalFund.status || '').toUpperCase())
+    : false
+
   useEffect(() => {
     if (disbursement) {
+      // Only pre-select the disbursement's original fund if it's still
+      // eligible to receive a return/reimbursement. If it's since been
+      // CLOSED, leave the field blank so the user has to actively choose
+      // one of the still-eligible funds instead of silently submitting
+      // against a fund that's no longer valid as a liquidation target.
       setRevolvingFundId(
-        disbursement.revolving_fund_id ? String(disbursement.revolving_fund_id) : '',
+        disbursement.revolving_fund_id && isOriginalFundEligible
+          ? String(disbursement.revolving_fund_id)
+          : '',
       )
       setAmountExpended('')
       setFormError(null)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [disbursement])
 
   const amountIssued = disbursement ? parseFloat(disbursement.amount_issued || 0) : 0
@@ -49,7 +92,7 @@ export default function SubmitCashDisbursementModal({
     setFormError(null)
 
     if (!revolvingFundId) {
-      setFormError('Please select a revolving fund.')
+      setFormError('Please select an active revolving fund to liquidate against.')
       return
     }
 
@@ -109,6 +152,16 @@ export default function SubmitCashDisbursementModal({
           </div>
         </div>
 
+        {!isOriginalFundEligible && originalFund && (
+          <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg">
+            This disbursement's original fund (
+            {getFundLabel ? getFundLabel(originalFund.id) : `Fund #${originalFund.id}`}) is{' '}
+            {originalFund.status} and can no longer receive a return or reimbursement. Select a
+            different, active fund below — the disbursement will still be recorded against its
+            original fund once liquidated.
+          </div>
+        )}
+
         {/* Revolving Fund (75% Width) & Amount Expended (25% Width) */}
         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <div className="sm:col-span-3">
@@ -121,13 +174,18 @@ export default function SubmitCashDisbursementModal({
               onChange={(e) => setRevolvingFundId(e.target.value)}
               className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
             >
-              <option value="">Select Revolving Fund...</option>
-              {revolvingFunds.map((fund) => (
+              <option value="">Select an active Revolving Fund...</option>
+              {eligibleFunds.map((fund) => (
                 <option key={fund.id} value={fund.id}>
                   {getFundLabel ? getFundLabel(fund.id) : fund.name || `Fund #${fund.id}`}
                 </option>
               ))}
             </select>
+            {eligibleFunds.length === 0 && (
+              <p className="text-[11px] text-red-600 mt-1 font-medium">
+                No active revolving funds are currently available to liquidate against.
+              </p>
+            )}
           </div>
 
           <div className="sm:col-span-1">
@@ -200,7 +258,7 @@ export default function SubmitCashDisbursementModal({
           </button>
           <button
             type="submit"
-            disabled={isSubmitting}
+            disabled={isSubmitting || eligibleFunds.length === 0}
             className="px-4 py-1.5 bg-[#E31837] hover:bg-[#c4122e] text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs disabled:opacity-50"
           >
             {isSubmitting ? 'Submitting...' : 'Submit Liquidation'}

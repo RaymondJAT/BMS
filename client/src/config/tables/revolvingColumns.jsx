@@ -247,9 +247,9 @@ export function createRevolvingColumns({
         let displayStatus = rawStatus
 
         if (!rawStatus) {
-          displayStatus = isSubmitted ? 'Reported' : 'Active'
+          displayStatus = isSubmitted ? 'REPORTED' : 'ACTIVE'
         } else if (rawStatus.toUpperCase() === 'OPEN') {
-          displayStatus = 'Active'
+          displayStatus = 'ACTIVE'
         }
 
         const statusKey = displayStatus.toLowerCase()

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { cashDisbursementApi } from '../api/cashDisbursementApi'
 
 /**
@@ -7,12 +8,24 @@ import { cashDisbursementApi } from '../api/cashDisbursementApi'
  * in sync with server-computed fields (outstanding_amount, status, etc —
  * these are never set optimistically since the backend, not the client,
  * owns that math).
+ *
+ * IMPORTANT: this hook manages its own disbursements list via plain state
+ * (not react-query), but issue/return/expended/reimburse can all change a
+ * revolving_fund's balance/status server-side — including auto-clearing a
+ * CLOSED fund to CLEARED once its last disbursement is settled (see
+ * cashDisbursementController.js). The Revolving Funds page reads funds
+ * through react-query (`useRevolvingFunds`, key ['revolvingFunds']), which
+ * has no way to know that data went stale from a mutation made through
+ * THIS hook. Every mutation below therefore also invalidates that query
+ * cache, or the fund list silently shows stale statuses/balances until the
+ * user manually retries or remounts the page.
  */
 export function useCashDisbursements(initialParams = {}) {
   const [disbursements, setDisbursements] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
   const [isMutating, setIsMutating] = useState(false)
+  const queryClient = useQueryClient()
 
   const fetchDisbursements = useCallback(async (params = initialParams) => {
     setIsLoading(true)
@@ -33,12 +46,21 @@ export function useCashDisbursements(initialParams = {}) {
     fetchDisbursements()
   }, [fetchDisbursements])
 
+  // Every disbursement action can move a revolving_fund's balance/status
+  // (including a CLOSED -> CLEARED auto-transition), so every successful
+  // mutation invalidates the funds cache in addition to refetching this
+  // hook's own disbursements list.
+  const invalidateRevolvingFunds = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['revolvingFunds'] })
+  }, [queryClient])
+
   const runMutation = useCallback(
     async (fn, payload) => {
       setIsMutating(true)
       try {
         const result = await fn(payload)
         await fetchDisbursements()
+        invalidateRevolvingFunds()
         return { success: true, data: result }
       } catch (err) {
         console.error('Cash disbursement mutation failed:', err)
@@ -48,7 +70,7 @@ export function useCashDisbursements(initialParams = {}) {
         setIsMutating(false)
       }
     },
-    [fetchDisbursements],
+    [fetchDisbursements, invalidateRevolvingFunds],
   )
 
   // Issue new cash from a revolving fund
@@ -77,6 +99,7 @@ export function useCashDisbursements(initialParams = {}) {
 
   // Metadata-only edit (received_by, department_id, particulars, cash_voucher)
   // — id is required; the backend rejects metadata upserts without one.
+  // Doesn't touch any revolving_fund, so no funds-cache invalidation needed.
   const updateMetadata = useCallback(
     (payload) => runMutation(cashDisbursementApi.save, payload),
     [runMutation],
@@ -89,6 +112,12 @@ export function useCashDisbursements(initialParams = {}) {
    * reimbursement for the excess — reusing the original cash_voucher, which
    * is exactly the "issue row + reimbursement row" pattern the backend's
    * 2-per-voucher limit is designed for.
+   *
+   * Can issue up to two sequential backend calls (recordExpended, then
+   * returnCash or reimburse). Either call alone can be the one that fully
+   * settles the disbursement and triggers a fund's CLOSED -> CLEARED
+   * transition server-side, so the funds cache is invalidated once at the
+   * end regardless of which combination actually ran.
    */
   const submitLiquidation = useCallback(
     async ({
@@ -140,17 +169,19 @@ export function useCashDisbursements(initialParams = {}) {
         }
 
         await fetchDisbursements()
+        invalidateRevolvingFunds()
         return { success: true }
       } catch (err) {
         console.error('Submit liquidation failed:', err)
         await fetchDisbursements()
+        invalidateRevolvingFunds()
         const message = err.response?.data?.message || 'Something went wrong. Please try again.'
         return { success: false, message }
       } finally {
         setIsMutating(false)
       }
     },
-    [fetchDisbursements],
+    [fetchDisbursements, invalidateRevolvingFunds],
   )
 
   return {
