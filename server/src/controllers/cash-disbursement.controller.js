@@ -94,11 +94,12 @@ const computeCdStatus = (issued, returned, expended) => {
 }
 
 /**
- * Manages ONLY the fund's ACTIVE states (OPEN -> ON REVIEW once cash has
- * been issued). CLOSED, CLEARED, and RETURN are all FINALIZED statuses and
- * are never changed by THIS function — CLOSED and CLEARED are otherwise
- * set exclusively by the explicit Submit/Report flow
- * (upsertClosedRevolvingFund in revolvingFundController.js).
+ * Manages ONLY the fund's ACTIVE states (OPEN -> ON REVIEW once the fund has
+ * seen activity — cash issued out OR cash returned in). CLOSED, CLEARED,
+ * and RETURN are all FINALIZED statuses and are never changed by THIS
+ * function — CLOSED and CLEARED are otherwise set exclusively by the
+ * explicit Submit/Report flow (upsertClosedRevolvingFund in
+ * revolvingFundController.js).
  *
  * The ONE exception — a CLOSED fund auto-advancing to CLEARED once its
  * last outstanding disbursement is settled — is NOT handled here. That
@@ -108,13 +109,17 @@ const computeCdStatus = (issued, returned, expended) => {
  * OPEN / ON REVIEW / CLEARED / RETURN.
  *
  * @param {string} currentStatus
- * @param {number} issued - the fund's rf_issued total AFTER this action.
+ * @param {boolean} hasActivity - true if this action gives the fund a
+ *   reason to move into review (e.g. newIssued > 0, or — for a fund that's
+ *   only ever RECEIVED a return/reimbursement — newReturned > 0). Callers
+ *   pass an already-evaluated boolean rather than a raw total so a fund
+ *   with issued === 0 but a nonzero incoming return still transitions.
  */
-const computeRfStatus = (currentStatus, issued) => {
+const computeRfStatus = (currentStatus, hasActivity) => {
   if (currentStatus === 'CLOSED' || currentStatus === 'CLEARED' || currentStatus === 'RETURN') {
     return currentStatus
   }
-  return parseNum(issued) > 0 ? 'ON REVIEW' : currentStatus
+  return hasActivity ? 'ON REVIEW' : currentStatus
 }
 
 /**
@@ -123,6 +128,12 @@ const computeRfStatus = (currentStatus, issued) => {
  * cash_disbursement rather than trusting the fund's own rf_outstanding
  * aggregate, so a drifted/stale aggregate can never wrongly flip a fund
  * to CLEARED while a real disbursement against it is still open.
+ *
+ * NOTE: the query builder's .select([Cash.Disbursement.cols.id]) aliases
+ * the result as `id` (e.g. `cd_id AS id`), not the raw db column name —
+ * so rows must be read via `r.id`, never `r[Cash.Disbursement.cols.id]`
+ * (that would look up a key that doesn't exist on the row and silently
+ * break this whole check).
  *
  * @param {number|string} fundId
  * @param {number|string} excludeCdId - the disbursement being settled in
@@ -137,7 +148,7 @@ const hasOtherUnliquidatedDisbursements = async (fundId, excludeCdId) => {
     .where(Cash.Disbursement.cols.status, 'UNLIQUIDATED')
     .build()
   const rows = await Query(sql, bindings)
-  return rows.some((r) => String(r[Cash.Disbursement.cols.id]) !== String(excludeCdId))
+  return rows.some((r) => String(r.id) !== String(excludeCdId))
 }
 
 /**
@@ -438,7 +449,7 @@ const issueCashDisbursement = async (req, res) => {
       const newRfIssued = parseNum(rf[Revolving.Fund.cols.issued]) + issueAmount
       const newRfOutstanding = parseNum(rf[Revolving.Fund.cols.outstanding]) + issueAmount
       const newRfBalance = currentBalance - issueAmount
-      const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfIssued)
+      const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfIssued > 0)
 
       const particularsName = await getParticularsNameById(particulars)
 
@@ -515,7 +526,10 @@ const issueCashDisbursement = async (req, res) => {
  *                - SELECTED/liquidation fund (`revolving_fund_id` in the
  *                  request body, defaults to the original fund) — the fund
  *                  that actually receives the returned cash. Must be
- *                  OPEN/ON REVIEW; its `returned`/`balance` totals go up.
+ *                  OPEN/ON REVIEW; its `returned`/`balance` totals go up,
+ *                  and it moves to ON REVIEW as a result of receiving this
+ *                  return even if it has never itself issued anything (see
+ *                  computeRfStatus's hasActivity contract).
  *
  *              When original and selected are the SAME fund, both effects
  *              land on the same row (identical to the old behavior) — and
@@ -616,7 +630,10 @@ const returnCashDisbursement = async (req, res) => {
       // Same fund owns both the AR and receives the cash. It already
       // passed the "not CLOSED" check above to get here, so it can never
       // be CLOSED at this point — computeRfStatus is always correct,
-      // identical to the pre-cross-fund-fix behavior.
+      // identical to the pre-cross-fund-fix behavior. Even a fund that has
+      // never issued anything of its own (issued === 0) must still move to
+      // ON REVIEW once it has a nonzero returned total, so both signals
+      // are OR'd together here.
       const newRfReturned = parseNum(targetFund[Revolving.Fund.cols.returned]) + returnAmount
       const newRfLiquidated = parseNum(targetFund[Revolving.Fund.cols.liquidated]) + returnAmount
       const newRfBalance = parseNum(targetFund[Revolving.Fund.cols.balance]) + returnAmount
@@ -626,7 +643,7 @@ const returnCashDisbursement = async (req, res) => {
       )
       const newRfStatus = computeRfStatus(
         targetFund[Revolving.Fund.cols.status],
-        targetFund[Revolving.Fund.cols.issued],
+        parseNum(targetFund[Revolving.Fund.cols.issued]) > 0 || newRfReturned > 0,
       )
 
       queries.push(
@@ -671,13 +688,18 @@ const returnCashDisbursement = async (req, res) => {
               id,
               newCdStatus,
             )
-          : computeRfStatus(originalStatus, originalFund[Revolving.Fund.cols.issued])
+          : computeRfStatus(originalStatus, parseNum(originalFund[Revolving.Fund.cols.issued]) > 0)
 
+      // The SELECTED/target fund receives cash it never issued itself, so
+      // it needs the same OR'd hasActivity check as the same-fund branch
+      // above — otherwise a fund that has only ever received returns
+      // (issued always 0) would incorrectly stay OPEN forever even as its
+      // balance moves.
       const newTargetReturned = parseNum(targetFund[Revolving.Fund.cols.returned]) + returnAmount
       const newTargetBalance = parseNum(targetFund[Revolving.Fund.cols.balance]) + returnAmount
       const newTargetStatus = computeRfStatus(
         targetFund[Revolving.Fund.cols.status],
-        targetFund[Revolving.Fund.cols.issued],
+        parseNum(targetFund[Revolving.Fund.cols.issued]) > 0 || newTargetReturned > 0,
       )
 
       const didAutoClear = originalStatus === 'CLOSED' && newOriginalStatus === 'CLEARED'
@@ -702,7 +724,7 @@ const returnCashDisbursement = async (req, res) => {
         ),
         buildRfActivityInsert(
           targetFundId,
-          `Received ₱${returnAmount.toFixed(2)} return for a disbursement originally issued from Fund #${originalFundId} — returned (${newTargetReturned}), balance (${newTargetBalance}).`,
+          `Received ₱${returnAmount.toFixed(2)} return for a disbursement originally issued from Fund #${originalFundId} — returned (${newTargetReturned}), balance (${newTargetBalance}), status: ${newTargetStatus}.`,
           userId,
         ),
       )
@@ -823,7 +845,7 @@ const recordExpendedCashDisbursement = async (req, res) => {
             id,
             newCdStatus,
           )
-        : computeRfStatus(rfStatus, rf[Revolving.Fund.cols.issued])
+        : computeRfStatus(rfStatus, parseNum(rf[Revolving.Fund.cols.issued]) > 0)
 
     const didAutoClear = rfStatus === 'CLOSED' && newRfStatus === 'CLEARED'
 
@@ -975,7 +997,7 @@ const reimburseCashDisbursement = async (req, res) => {
       const newRfExpended = parseNum(rf[Revolving.Fund.cols.amount_expended]) + reimburseAmount
       const newRfLiquidated = parseNum(rf[Revolving.Fund.cols.liquidated]) + reimburseAmount
       const newRfBalance = currentBalance - reimburseAmount
-      const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfIssued)
+      const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfIssued > 0)
 
       const particularsName = await getParticularsNameById(particulars)
 
