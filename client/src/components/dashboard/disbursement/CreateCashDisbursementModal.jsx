@@ -1,27 +1,15 @@
 import { useState, useEffect } from 'react'
 import { Modal } from '../../ui/Modal'
 
-/**
- * Creates a disbursement via the real issueCashDisbursement action.
- * Differences from the old mock version:
- * - "Amount Returned" removed — issueCashDisbursement has no such field;
- *   a fresh issue is never pre-returned.
- * - Revolving Fund / Employee / Department / Particulars are now real
- *   selects sourced from the lookups hook, not mock arrays.
- * - Department is derived from the selected employee when the employee
- *   record includes a department_id, but stays independently selectable
- *   in case that's not the case (see the ASSUMPTION note in
- *   masterEmployeeApi.js — confirm the actual field name once known).
- */
 export default function CreateCashDisbursementModal({
   isOpen,
   onClose,
   onIssue,
   isSubmitting,
-  revolvingFunds,
-  employees,
-  departments,
-  particulars,
+  revolvingFunds = [],
+  employees = [],
+  departments = [],
+  particulars = [],
   getFundLabel,
 }) {
   const [formData, setFormData] = useState({
@@ -48,7 +36,13 @@ export default function CreateCashDisbursementModal({
     }
   }, [isOpen])
 
-  // Derive the active selected fund object and format its balance
+  const handleAmountKeyDown = (e) => {
+    if (['e', 'E', '+', '-'].includes(e.key)) {
+      e.preventDefault()
+    }
+  }
+
+  // Derive active selected fund object and format its balance
   const selectedFund = revolvingFunds.find(
     (fund) => String(fund.id) === String(formData.revolving_fund_id),
   )
@@ -66,8 +60,6 @@ export default function CreateCashDisbursementModal({
     setFormData((prev) => ({
       ...prev,
       received_by: employeeId,
-      // Auto-fill department if the employee record carries one; otherwise
-      // leave whatever the person already picked.
       department_id: employee?.department_id ?? prev.department_id,
     }))
   }
@@ -114,17 +106,18 @@ export default function CreateCashDisbursementModal({
       onClose={onClose}
       title="Issue Cash Disbursement"
       subtitle="Issue a new cash disbursement voucher to an authorized payee."
-      maxWidth="max-w-xl"
+      maxWidth="max-w-lg"
     >
-      <form onSubmit={handleSubmit} className="space-y-3">
+      <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-3.5">
         {formError && (
-          <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg">
+          <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg font-medium">
             {formError}
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-          <div>
+        {/* REVOLVING FUND, BALANCE, & VOUCHER NO. */}
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 sm:gap-3">
+          <div className="sm:col-span-6">
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
               Revolving Fund <span className="text-red-500">*</span>
             </label>
@@ -132,20 +125,20 @@ export default function CreateCashDisbursementModal({
               required
               value={formData.revolving_fund_id}
               onChange={(e) => setFormData({ ...formData, revolving_fund_id: e.target.value })}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all cursor-pointer"
             >
               <option value="">Select Revolving Fund...</option>
               {revolvingFunds.map((fund) => (
                 <option key={fund.id} value={fund.id}>
-                  {getFundLabel(fund.id)}
+                  {getFundLabel ? getFundLabel(fund.id) : fund.name || `Fund #${fund.id}`}
                 </option>
               ))}
             </select>
           </div>
 
-          <div>
+          <div className="sm:col-span-3">
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Fund Balance
+              Balance
             </label>
             <input
               type="text"
@@ -153,12 +146,27 @@ export default function CreateCashDisbursementModal({
               tabIndex={-1}
               placeholder="₱ 0.00"
               value={selectedFundBalance}
-              className="w-full px-2.5 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 cursor-not-allowed select-none focus:outline-none"
+              className="w-full px-2 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 cursor-not-allowed select-none focus:outline-none"
+            />
+          </div>
+
+          <div className="sm:col-span-3">
+            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+              Voucher No. <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              required
+              placeholder="CV-10025"
+              value={formData.cash_voucher}
+              onChange={(e) => setFormData({ ...formData, cash_voucher: e.target.value })}
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all placeholder:text-slate-400"
             />
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        {/* RECEIVED BY & DEPARTMENT */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
           <div>
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
               Received By <span className="text-red-500">*</span>
@@ -167,7 +175,7 @@ export default function CreateCashDisbursementModal({
               required
               value={formData.received_by}
               onChange={handleEmployeeChange}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all cursor-pointer"
             >
               <option value="">Select Employee...</option>
               {employees.map((emp) => (
@@ -186,7 +194,7 @@ export default function CreateCashDisbursementModal({
               required
               value={formData.department_id}
               onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all cursor-pointer"
             >
               <option value="">Select Department...</option>
               {departments.map((dept) => (
@@ -198,41 +206,28 @@ export default function CreateCashDisbursementModal({
           </div>
         </div>
 
-        <div>
-          <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-            Particulars <span className="text-red-500">*</span>
-          </label>
-          <select
-            required
-            value={formData.particulars}
-            onChange={(e) => setFormData({ ...formData, particulars: e.target.value })}
-            className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
-          >
-            <option value="">Select Particulars...</option>
-            {particulars.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name || p.description || `Particulars #${p.id}`}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-          <div>
+        {/* PARTICULAR & AMOUNT ISSUED */}
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 sm:gap-3">
+          <div className="sm:col-span-8">
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Voucher No. <span className="text-red-500">*</span>
+              Particulars <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
+            <select
               required
-              placeholder="e.g. CV-10025"
-              value={formData.cash_voucher}
-              onChange={(e) => setFormData({ ...formData, cash_voucher: e.target.value })}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all placeholder:text-slate-400"
-            />
+              value={formData.particulars}
+              onChange={(e) => setFormData({ ...formData, particulars: e.target.value })}
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all cursor-pointer"
+            >
+              <option value="">Select Particulars...</option>
+              {particulars.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name || p.description || `Particulars #${p.id}`}
+                </option>
+              ))}
+            </select>
           </div>
 
-          <div>
+          <div className="sm:col-span-4">
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
               Amount Issued <span className="text-red-500">*</span>
             </label>
@@ -247,13 +242,15 @@ export default function CreateCashDisbursementModal({
                 required
                 placeholder="0.00"
                 value={formData.amount_issued}
+                onKeyDown={handleAmountKeyDown}
                 onChange={(e) => setFormData({ ...formData, amount_issued: e.target.value })}
-                className="w-full pl-6 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
+                className="w-full pl-6 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
             </div>
           </div>
         </div>
 
+        {/* FOOTER ACTIONS */}
         <div className="flex items-center justify-end gap-2 pt-2.5 border-t border-slate-100">
           <button
             type="button"

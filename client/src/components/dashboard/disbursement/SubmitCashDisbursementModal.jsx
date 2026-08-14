@@ -3,23 +3,6 @@ import { Modal } from '../../ui/Modal'
 
 const ELIGIBLE_LIQUIDATION_STATUSES = ['OPEN', 'ON REVIEW']
 
-/**
- * Records a return and/or expended amount against an existing disbursement.
- * Automates Return vs. Reimbursement calculations based on Amount Expended vs Amount Issued.
- *
- * The "Target Revolving Fund" here is the LIQUIDATION fund — where a return
- * or reimbursement gets credited — which may differ from the disbursement's
- * ORIGINAL fund (the one it was issued from). The original fund keeps its
- * own association untouched no matter what's picked here (see
- * returnCashDisbursement/reimburseCashDisbursement in the backend): this
- * modal only ever supplies revolving_fund_id as the liquidation target, it
- * never changes which fund the disbursement was created under. Only
- * eligible (OPEN / ON REVIEW) funds are offered, since a CLOSED fund can't
- * receive a return or issue a reimbursement — the disbursement's original
- * fund is allowed to be CLOSED (that's exactly the case this list excludes
- * it for the liquidation target while amount_expended still always posts
- * back to it regardless of its status).
- */
 export default function SubmitCashDisbursementModal({
   isOpen,
   onClose,
@@ -55,11 +38,6 @@ export default function SubmitCashDisbursementModal({
 
   useEffect(() => {
     if (disbursement) {
-      // Only pre-select the disbursement's original fund if it's still
-      // eligible to receive a return/reimbursement. If it's since been
-      // CLOSED, leave the field blank so the user has to actively choose
-      // one of the still-eligible funds instead of silently submitting
-      // against a fund that's no longer valid as a liquidation target.
       setRevolvingFundId(
         disbursement.revolving_fund_id && isOriginalFundEligible
           ? String(disbursement.revolving_fund_id)
@@ -68,7 +46,6 @@ export default function SubmitCashDisbursementModal({
       setAmountExpended('')
       setFormError(null)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [disbursement])
 
   const amountIssued = disbursement ? parseFloat(disbursement.amount_issued || 0) : 0
@@ -87,6 +64,12 @@ export default function SubmitCashDisbursementModal({
 
   if (!disbursement) return null
 
+  const handleAmountKeyDown = (e) => {
+    if (['e', 'E', '+', '-'].includes(e.key)) {
+      e.preventDefault()
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     setFormError(null)
@@ -102,7 +85,6 @@ export default function SubmitCashDisbursementModal({
       return
     }
 
-    // Amount to return to company (positive difference) or 0 if reimbursed
     const ret = difference > 0 ? difference : 0
 
     const result = await onSubmit({
@@ -129,15 +111,15 @@ export default function SubmitCashDisbursementModal({
       subtitle="Settle outstanding cash for this disbursement voucher."
       maxWidth="max-w-lg"
     >
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-3.5">
         {formError && (
-          <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg">
+          <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg font-medium">
             {formError}
           </div>
         )}
 
         {/* Read-Only Metadata Card */}
-        <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-lg border border-slate-200/80 text-xs">
+        <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 sm:p-3 rounded-lg border border-slate-200/80 text-xs">
           <div>
             <span className="text-slate-400 block text-[10px] uppercase font-bold tracking-wider">
               Cash Voucher
@@ -153,26 +135,26 @@ export default function SubmitCashDisbursementModal({
         </div>
 
         {!isOriginalFundEligible && originalFund && (
-          <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg">
+          <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg font-medium leading-relaxed">
             This disbursement's original fund (
             {getFundLabel ? getFundLabel(originalFund.id) : `Fund #${originalFund.id}`}) is{' '}
-            {originalFund.status} and can no longer receive a return or reimbursement. Select a
-            different, active fund below — the disbursement will still be recorded against its
-            original fund once liquidated.
+            <span className="font-bold">{originalFund.status}</span> and can no longer receive a
+            return or reimbursement. Select a different, active fund below — the disbursement will
+            still be recorded against its original fund once liquidated.
           </div>
         )}
 
-        {/* Revolving Fund (75% Width) & Amount Expended (25% Width) */}
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-          <div className="sm:col-span-3">
-            <label className="block text-xs font-bold text-slate-700 mb-1">
+        {/* Target Fund & Amount Expended */}
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 sm:gap-3">
+          <div className="sm:col-span-8">
+            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
               Target Revolving Fund <span className="text-red-500">*</span>
             </label>
             <select
               required
               value={revolvingFundId}
               onChange={(e) => setRevolvingFundId(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all cursor-pointer"
             >
               <option value="">Select an active Revolving Fund...</option>
               {eligibleFunds.map((fund) => (
@@ -188,9 +170,9 @@ export default function SubmitCashDisbursementModal({
             )}
           </div>
 
-          <div className="sm:col-span-1">
+          <div className="sm:col-span-4">
             <label
-              className="block text-xs font-bold text-slate-700 mb-1 truncate"
+              className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1 truncate"
               title="Amount Expended"
             >
               Amount Expended <span className="text-red-500">*</span>
@@ -206,15 +188,16 @@ export default function SubmitCashDisbursementModal({
                 required
                 placeholder="0.00"
                 value={amountExpended}
+                onKeyDown={handleAmountKeyDown}
                 onChange={(e) => setAmountExpended(e.target.value)}
-                className="w-full pl-6 pr-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
+                className="w-full pl-6 pr-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all appearance-none [-moz-appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
               />
             </div>
           </div>
         </div>
 
         {/* Amount Summary Displays */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
           <div className="p-2.5 bg-amber-50/60 border border-amber-200/70 rounded-lg">
             <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">
               Requested Amount (Issued)
@@ -248,7 +231,8 @@ export default function SubmitCashDisbursementModal({
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-100">
+        {/* Footer Buttons */}
+        <div className="flex items-center justify-end gap-2 pt-2.5 border-t border-slate-100">
           <button
             type="button"
             onClick={onClose}
