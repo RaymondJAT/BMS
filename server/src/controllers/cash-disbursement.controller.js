@@ -1,6 +1,7 @@
 const { Query, Transaction, SQLQueryBuilder } = require('../database/utilities/queries.util')
 const { Cash } = require('../database/models/Cash')
 const { Revolving } = require('../database/models/Revolving')
+const { Budget } = require('../database/models/Budget')
 const SQL = new SQLQueryBuilder()
 
 const wrapRow = (row, model) => {
@@ -64,6 +65,21 @@ const getRevolvingFundById = async (id) => {
     .build()
   const [row] = await Query(sql, bindings)
   return wrapRow(row, Revolving.Fund)
+}
+
+/**
+ * Needed so editCashDisbursementAmount can determine whether the
+ * disbursement's revolving fund is itself linked to a Budget, and if so,
+ * pull that budget's CURRENT amount server-side to apply the difference
+ * against — never trusting a client-supplied budget total.
+ */
+const getBudgetById = async (id) => {
+  const { sql, bindings } = SQL.model(Budget.Budget)
+    .select(Budget.Budget.select)
+    .where(Budget.Budget.pk, id)
+    .build()
+  const [row] = await Query(sql, bindings)
+  return wrapRow(row, Budget.Budget)
 }
 
 /**
@@ -153,18 +169,18 @@ const hasOtherUnliquidatedDisbursements = async (fundId, excludeCdId) => {
 
 /**
  * Decides whether a CLOSED fund should auto-transition to CLEARED as part
- * of a settlement (return or expended) landing on it. This is the ONLY
- * place a CLOSED fund can become CLEARED outside the manual Submit/Report
- * flow (upsertClosedRevolvingFund) — and it only ever fires CLOSED ->
- * CLEARED, never any other transition. Callers must only invoke this when
- * the fund's CURRENT status is already CLOSED; for any other status, use
- * computeRfStatus instead.
+ * of a settlement (return, expended, or a decreasing amount edit) landing
+ * on it. This is the ONLY place a CLOSED fund can become CLEARED outside
+ * the manual Submit/Report flow (upsertClosedRevolvingFund) — and it only
+ * ever fires CLOSED -> CLEARED, never any other transition. Callers must
+ * only invoke this when the fund's CURRENT status is already CLOSED; for
+ * any other status, use computeRfStatus instead.
  *
  * Requires ALL of:
  *   1. This settlement brought the fund's own rf_outstanding to 0, AND
  *   2. The disbursement being settled right now is itself fully
- *      LIQUIDATED by this action (a partial return/expended that leaves
- *      it UNLIQUIDATED can't clear the fund), AND
+ *      LIQUIDATED by this action (a partial settlement that leaves it
+ *      UNLIQUIDATED can't clear the fund), AND
  *   3. No OTHER cash_disbursement row against this fund is still
  *      UNLIQUIDATED — checked directly against the table (see
  *      hasOtherUnliquidatedDisbursements) rather than trusting
@@ -194,15 +210,17 @@ const resolveClosedFundStatus = async (
 }
 
 /**
- * Fund statuses that should never accept a NEW cash issuance (issue) or a
- * NEW reimbursement (which is modeled as a fresh issuance). OPEN and
- * ON REVIEW are the only "active" states a fund can issue NEW cash from.
+ * Fund statuses that should never accept a NEW cash issuance (issue), a
+ * NEW reimbursement (which is modeled as a fresh issuance), or an INCREASE
+ * to an existing disbursement's amount (which pulls additional cash out of
+ * the fund the same way a fresh issue would). OPEN and ON REVIEW are the
+ * only "active" states a fund can issue NEW/ADDITIONAL cash from.
  *
  * This deliberately does NOT apply to settling an EXISTING disbursement's
- * amount_expended (recordExpendedCashDisbursement) — that's allowed
- * against a CLOSED fund on purpose, since it's not new money leaving
- * anywhere, just marking already-issued cash as spent. See that
- * function's docstring.
+ * amount_expended (recordExpendedCashDisbursement) or DECREASING an
+ * existing disbursement's amount (editCashDisbursementAmount) — those
+ * release money back rather than pulling new money out, so they're allowed
+ * against a CLOSED fund on purpose. See those functions' docstrings.
  */
 const NON_ISSUABLE_RF_STATUSES = ['CLOSED', 'CLEARED', 'RETURN']
 
@@ -245,6 +263,42 @@ const buildCdUpdate = (cashDisbursementId, updateData) => {
   return toTxQuery(query)
 }
 
+/**
+ * Builds the budget update + budget_history insert as Transaction-ready
+ * query objects, WITHOUT executing them. Duplicated from
+ * revolvingFundController.js's buildBudgetChangeQueries rather than
+ * shared — matches this codebase's existing per-controller pattern (see
+ * that file's own copy of this same helper).
+ *
+ * @param {object} budgetRow - row previously fetched via getBudgetById
+ * @param {number} delta - positive credits the budget, negative debits it.
+ */
+const buildBudgetChangeQueries = (budgetRow, delta, departmentId, userId, remarks) => {
+  const previousAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
+  const newAmount = previousAmount + delta
+
+  const updateQuery = SQL.model(Budget.Budget)
+    .update({ [Budget.Budget.cols.amount]: newAmount })
+    .where(Budget.Budget.pk, budgetRow[Budget.Budget.cols.id])
+    .build()
+
+  const historyQuery = SQL.model(Budget.History)
+    .insert({
+      [Budget.History.cols.budget_id]: budgetRow[Budget.Budget.cols.id],
+      [Budget.History.cols.amount]: Math.abs(delta),
+      [Budget.History.cols.previous_amount]: previousAmount,
+      [Budget.History.cols.new_amount]: newAmount,
+      [Budget.History.cols.remarks]: remarks || null,
+      [Budget.History.cols.department_id]: departmentId,
+      [Budget.History.cols.type]: budgetRow[Budget.Budget.cols.type],
+      [Budget.History.cols.date]: new Date(),
+      [Budget.History.cols.created_by]: userId,
+    })
+    .build()
+
+  return [toTxQuery(updateQuery), toTxQuery(historyQuery)]
+}
+
 // ==========================================
 // METADATA-ONLY UPSERT
 // ==========================================
@@ -254,13 +308,14 @@ const buildCdUpdate = (cashDisbursementId, updateData) => {
  * @description Create or update a cash disbursement's METADATA only
  *              (received_by, revolving_fund_id, department_id, particulars, cash_voucher).
  *              Amount and status fields are intentionally not editable here —
- *              use issueCashDisbursement / returnCashDisbursement /
- *              recordExpendedCashDisbursement / reimburseCashDisbursement instead,
- *              so cash_disbursement never drifts out of sync with revolving_fund/budget.
+ *              use editCashDisbursementAmount / issueCashDisbursement /
+ *              returnCashDisbursement / recordExpendedCashDisbursement /
+ *              reimburseCashDisbursement instead, so cash_disbursement never
+ *              drifts out of sync with revolving_fund/budget.
  */
 const upsertCashDisbursement = async (req, res) => {
   // #swagger.tags = ['Cash Disbursement']
-  // #swagger.description = 'Upsert Disbursement metadata (no amount/status fields — use the action endpoints for those)'
+  // #swagger.description = 'Upsert Disbursement metadata (no amount/status fields — use editCashDisbursementAmount or the action endpoints for those)'
   // #swagger.autoBody = false
   // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
   /* 
@@ -332,6 +387,227 @@ const upsertCashDisbursement = async (req, res) => {
   } catch (error) {
     console.error('Error in upsertCashDisbursement:', error)
     return res.status(500).json({ message: 'Error processing Disbursement' })
+  }
+}
+
+// ==========================================
+// ACTION: EDIT AMOUNT
+// ==========================================
+
+/**
+ * @name editCashDisbursementAmount
+ * @description Edit a Cash Disbursement's amount_issued and automatically
+ *              recalculate every downstream financial record affected by
+ *              the change — the disbursement's own outstanding/status, its
+ *              revolving fund (issued/outstanding/balance/status), and —
+ *              if that fund is linked to a Budget — the budget itself.
+ *
+ *              The recalculation is ALWAYS based on the DIFFERENCE
+ *              (new_amount - old_amount), never the new amount treated as
+ *              a fresh transaction:
+ *                difference > 0 (increase) -> additional amount is
+ *                  deducted from the fund's balance (and the budget, if
+ *                  connected) — same direction as a fresh issue.
+ *                difference < 0 (decrease) -> the difference is released
+ *                  back to the fund's balance (and the budget, if
+ *                  connected) — same direction as a return.
+ *                difference === 0 -> no financial records are touched.
+ *
+ *              Lifecycle: only disbursements that are NOT already
+ *              LIQUIDATED can have their amount edited (mirrors the
+ *              existing UI rule in disbursementColumns.jsx, which disables
+ *              the Edit action once status === 'LIQUIDATED') — a fully
+ *              settled disbursement is treated as immutable, matching how
+ *              this controller already treats CLOSED revolving funds and
+ *              budgets as immutable elsewhere.
+ *
+ *              Fund status guard: an INCREASE pulls new cash out of the
+ *              fund, so it's blocked under the same NON_ISSUABLE_RF_STATUSES
+ *              rule as a fresh issue (CLOSED/CLEARED/RETURN). A DECREASE
+ *              releases cash back, which — like returnCashDisbursement
+ *              settling an existing AR — is allowed even against a CLOSED
+ *              fund, and can itself trigger that fund's CLOSED -> CLEARED
+ *              auto-transition via resolveClosedFundStatus if this was its
+ *              last remaining unliquidated disbursement.
+ *
+ *              Budget connection is resolved via the disbursement's
+ *              revolving_fund.budget_id — cash_disbursement has no direct
+ *              budget FK of its own. If the fund has no budget_id, only
+ *              the disbursement and fund are recalculated; no Budget row
+ *              is touched.
+ */
+const editCashDisbursementAmount = async (req, res) => {
+  // #swagger.tags = ['Cash Disbursement']
+  // #swagger.description = 'Edit a disbursement'\''s amount_issued. Recalculates only the DIFFERENCE against its revolving fund and (if connected via the fund) its budget. Blocked once the disbursement is LIQUIDATED.'
+  // #swagger.autoBody = false
+  // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
+  /* 
+    #swagger.parameters['id'] = { in: 'formData', type: 'integer', required: true, description: 'Cash disbursement id' }
+    #swagger.parameters['amount_issued'] = { in: 'formData', type: 'number', required: true, description: 'New amount_issued for the disbursement' }
+  */
+
+  const userId = req.userId || req.user?.id || 1
+  const { id, amount_issued } = req.body
+
+  if (!id) {
+    return res.status(400).json({ message: 'Missing required field: id' })
+  }
+  if (amount_issued === undefined) {
+    return res.status(400).json({ message: 'Missing required field: amount_issued' })
+  }
+
+  const newAmount = parseNum(amount_issued)
+  if (newAmount <= 0) {
+    return res.status(400).json({ message: 'amount_issued must be greater than zero' })
+  }
+
+  try {
+    const cd = await getCashDisbursementById(id)
+    if (!cd) {
+      return res.status(404).json({ message: 'Disbursement not found' })
+    }
+
+    if (cd[Cash.Disbursement.cols.status] === 'LIQUIDATED') {
+      return res
+        .status(400)
+        .json({ message: 'Cannot edit the amount of a liquidated disbursement.' })
+    }
+
+    const oldAmount = parseNum(cd[Cash.Disbursement.cols.amount_issued])
+    const difference = Math.round((newAmount - oldAmount) * 100) / 100
+
+    if (difference === 0) {
+      return res
+        .status(200)
+        .json({ message: 'No amount change detected — nothing to recalculate.', id })
+    }
+
+    const currentReturned = parseNum(cd[Cash.Disbursement.cols.amount_returned])
+    const currentExpended = parseNum(cd[Cash.Disbursement.cols.amount_expended])
+    const alreadySettled = currentReturned + currentExpended
+
+    // Can't shrink amount_issued below money already accounted for by a
+    // prior return/expended against THIS disbursement — that would mean
+    // more has already been settled than the disbursement now claims to
+    // have ever issued.
+    if (newAmount < alreadySettled) {
+      return res.status(400).json({
+        message: `New amount (₱${newAmount.toFixed(2)}) cannot be less than the amount already returned/expended (₱${alreadySettled.toFixed(2)}) against this disbursement.`,
+      })
+    }
+
+    const { outstanding: newCdOutstanding, status: newCdStatus } = computeCdStatus(
+      newAmount,
+      currentReturned,
+      currentExpended,
+    )
+
+    const fundId = cd[Cash.Disbursement.cols.revolving_fund_id]
+    const rf = await getRevolvingFundById(fundId)
+    if (!rf) {
+      return res.status(404).json({ message: 'Associated revolving fund not found' })
+    }
+
+    const rfStatus = rf[Revolving.Fund.cols.status]
+
+    if (difference > 0 && NON_ISSUABLE_RF_STATUSES.includes(rfStatus)) {
+      return res.status(400).json({
+        message: `Cannot increase disbursement amount — its revolving fund has status ${rfStatus}.`,
+      })
+    }
+
+    const currentRfBalance = parseNum(rf[Revolving.Fund.cols.balance])
+    if (difference > 0 && currentRfBalance < difference) {
+      return res
+        .status(400)
+        .json({ message: 'Insufficient revolving fund balance to cover the increase.' })
+    }
+
+    const newRfIssued = parseNum(rf[Revolving.Fund.cols.issued]) + difference
+    const newRfOutstanding = Math.max(0, parseNum(rf[Revolving.Fund.cols.outstanding]) + difference)
+    const newRfBalance = currentRfBalance - difference
+
+    // Only ever reaches the CLOSED branch on a decrease (difference > 0
+    // against a CLOSED/CLEARED/RETURN fund was already rejected above) —
+    // same reasoning as returnCashDisbursement's cross-fund settlement.
+    const newRfStatus =
+      rfStatus === 'CLOSED'
+        ? await resolveClosedFundStatus(rfStatus, newRfOutstanding, fundId, id, newCdStatus)
+        : computeRfStatus(rfStatus, newRfIssued > 0)
+
+    const didAutoClear = rfStatus === 'CLOSED' && newRfStatus === 'CLEARED'
+
+    // Budget connection check — resolved via the FUND, not the
+    // disbursement (cash_disbursement has no budget FK of its own).
+    const budgetId = rf[Revolving.Fund.cols.budget_id]
+    let budgetQueries = []
+
+    if (budgetId) {
+      const budgetRow = await getBudgetById(budgetId)
+      if (!budgetRow) {
+        return res.status(400).json({ message: `Associated budget ${budgetId} not found.` })
+      }
+
+      const currentBudgetAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
+      if (difference > 0 && currentBudgetAmount < difference) {
+        return res
+          .status(400)
+          .json({ message: 'Insufficient budget amount balance to cover the increase.' })
+      }
+
+      budgetQueries = buildBudgetChangeQueries(
+        budgetRow,
+        -difference,
+        budgetRow[Budget.Budget.cols.department_id],
+        userId,
+        `Adjustment for Cash Disbursement #${id} amount edit (₱${oldAmount.toFixed(2)} → ₱${newAmount.toFixed(2)}, ${difference > 0 ? '+' : ''}₱${difference.toFixed(2)})`,
+      )
+    }
+
+    const particularsName = await getParticularsNameById(cd[Cash.Disbursement.cols.particulars])
+
+    const queries = [
+      buildCdUpdate(id, {
+        [Cash.Disbursement.cols.amount_issued]: newAmount,
+        [Cash.Disbursement.cols.outstanding_amount]: newCdOutstanding,
+        [Cash.Disbursement.cols.status]: newCdStatus,
+      }),
+      buildCdActivityInsert(
+        id,
+        Math.abs(difference),
+        `Amount edited: ₱${oldAmount.toFixed(2)} → ₱${newAmount.toFixed(2)} (${difference > 0 ? '+' : ''}₱${difference.toFixed(2)})`,
+        particularsName,
+      ),
+      buildRfUpdate(fundId, {
+        [Revolving.Fund.cols.issued]: newRfIssued,
+        [Revolving.Fund.cols.outstanding]: newRfOutstanding,
+        [Revolving.Fund.cols.balance]: newRfBalance,
+        [Revolving.Fund.cols.status]: newRfStatus,
+      }),
+      buildRfActivityInsert(
+        fundId,
+        didAutoClear
+          ? `Disbursement #${id} amount edit fully settled this fund's outstanding — no remaining unliquidated disbursements. Status: CLOSED → CLEARED.`
+          : `Disbursement #${id} amount edited (${difference > 0 ? '+' : ''}₱${difference.toFixed(2)}) — issued (${newRfIssued}), outstanding (${newRfOutstanding}), balance (${newRfBalance}), status: ${newRfStatus}.`,
+        userId,
+      ),
+      ...budgetQueries,
+    ]
+
+    await Transaction(queries)
+
+    return res.status(200).json({
+      message: 'Cash disbursement amount updated successfully',
+      id,
+      old_amount: oldAmount,
+      new_amount: newAmount,
+      difference,
+    })
+  } catch (error) {
+    console.error('Error in editCashDisbursementAmount:', error)
+    return res
+      .status(500)
+      .json({ message: 'Error editing cash disbursement amount', error: error.message })
   }
 }
 
@@ -1286,6 +1562,7 @@ const upsertCashDisbursementActivity = async (req, res) => {
 module.exports = {
   getCashDisbursement,
   upsertCashDisbursement,
+  editCashDisbursementAmount,
   issueCashDisbursement,
   returnCashDisbursement,
   recordExpendedCashDisbursement,

@@ -2,6 +2,7 @@ const express = require('express')
 const {
   getCashDisbursement,
   upsertCashDisbursement,
+  editCashDisbursementAmount,
   issueCashDisbursement,
   returnCashDisbursement,
   recordExpendedCashDisbursement,
@@ -16,6 +17,7 @@ const cashDisbursementRouter = express.Router()
 
 cashDisbursementRouter.get('/', getCashDisbursement)
 cashDisbursementRouter.post('/', upsertCashDisbursement)
+cashDisbursementRouter.post('/edit-amount', editCashDisbursementAmount)
 
 cashDisbursementRouter.post('/issue', issueCashDisbursement)
 cashDisbursementRouter.post('/return', returnCashDisbursement)

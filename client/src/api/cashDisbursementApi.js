@@ -7,9 +7,20 @@ export const cashDisbursementApi = {
     return response.data || []
   },
 
-  // Create or Update a cash disbursement entry
+  // Create or Update a cash disbursement entry (metadata only — received_by,
+  // department_id, particulars, cash_voucher. Amount is NOT editable through
+  // this endpoint — use editAmount below.)
   save: async (payload) => {
     const response = await apiClient.post('/cash-disbursement', payload)
+    return response.data
+  },
+
+  // Edit a disbursement's amount_issued. Backend recalculates only the
+  // difference against the related revolving fund (and budget, if the
+  // fund is connected to one) — never treats the new amount as a fresh
+  // transaction.
+  editAmount: async (payload) => {
+    const response = await apiClient.post('/cash-disbursement/edit-amount', payload)
     return response.data
   },
 

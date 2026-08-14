@@ -32,8 +32,15 @@ const formatCurrency = (val) =>
   }).format(val || 0)
 
 function DisbursementsPage() {
-  const { disbursements, isLoading, isMutating, error, issue, updateMetadata, submitLiquidation } =
-    useCashDisbursements()
+  const {
+    disbursements,
+    isLoading,
+    isMutating,
+    error,
+    issue,
+    saveDisbursement,
+    submitLiquidation,
+  } = useCashDisbursements()
 
   const {
     revolvingFunds,
@@ -279,7 +286,7 @@ function DisbursementsPage() {
           isOpen={activeModal === 'edit'}
           onClose={handleCloseModal}
           disbursement={selectedDisbursement}
-          onSave={updateMetadata}
+          onSave={saveDisbursement}
           isSubmitting={isMutating}
           employees={employees}
           departments={departments}

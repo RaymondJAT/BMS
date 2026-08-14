@@ -10,15 +10,15 @@ import { cashDisbursementApi } from '../api/cashDisbursementApi'
  * owns that math).
  *
  * IMPORTANT: this hook manages its own disbursements list via plain state
- * (not react-query), but issue/return/expended/reimburse can all change a
- * revolving_fund's balance/status server-side — including auto-clearing a
- * CLOSED fund to CLEARED once its last disbursement is settled (see
- * cashDisbursementController.js). The Revolving Funds page reads funds
- * through react-query (`useRevolvingFunds`, key ['revolvingFunds']), which
- * has no way to know that data went stale from a mutation made through
- * THIS hook. Every mutation below therefore also invalidates that query
- * cache, or the fund list silently shows stale statuses/balances until the
- * user manually retries or remounts the page.
+ * (not react-query), but issue/return/expended/reimburse/editAmount can
+ * all change a revolving_fund's balance/status server-side — including
+ * auto-clearing a CLOSED fund to CLEARED once its last disbursement is
+ * settled (see cashDisbursementController.js). The Revolving Funds page
+ * reads funds through react-query (`useRevolvingFunds`, key
+ * ['revolvingFunds']), which has no way to know that data went stale from
+ * a mutation made through THIS hook. Every mutation below therefore also
+ * invalidates that query cache, or the fund list silently shows stale
+ * statuses/balances until the user manually retries or remounts the page.
  */
 export function useCashDisbursements(initialParams = {}) {
   const [disbursements, setDisbursements] = useState([])
@@ -46,21 +46,21 @@ export function useCashDisbursements(initialParams = {}) {
     fetchDisbursements()
   }, [fetchDisbursements])
 
-  // Every disbursement action can move a revolving_fund's balance/status
-  // (including a CLOSED -> CLEARED auto-transition), so every successful
-  // mutation invalidates the funds cache in addition to refetching this
-  // hook's own disbursements list.
+  // Every disbursement action that touches a revolving_fund can move its
+  // balance/status (including a CLOSED -> CLEARED auto-transition), so
+  // every such mutation invalidates the funds cache in addition to
+  // refetching this hook's own disbursements list.
   const invalidateRevolvingFunds = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['revolvingFunds'] })
   }, [queryClient])
 
   const runMutation = useCallback(
-    async (fn, payload) => {
+    async (fn, payload, { invalidateFunds = true } = {}) => {
       setIsMutating(true)
       try {
         const result = await fn(payload)
         await fetchDisbursements()
-        invalidateRevolvingFunds()
+        if (invalidateFunds) invalidateRevolvingFunds()
         return { success: true, data: result }
       } catch (err) {
         console.error('Cash disbursement mutation failed:', err)
@@ -101,8 +101,75 @@ export function useCashDisbursements(initialParams = {}) {
   // — id is required; the backend rejects metadata upserts without one.
   // Doesn't touch any revolving_fund, so no funds-cache invalidation needed.
   const updateMetadata = useCallback(
-    (payload) => runMutation(cashDisbursementApi.save, payload),
+    (payload) => runMutation(cashDisbursementApi.save, payload, { invalidateFunds: false }),
     [runMutation],
+  )
+
+  // Amount edit — recalculates the difference against the related
+  // revolving fund (and budget, if connected). Can move fund balance/
+  // status, including a CLOSED -> CLEARED auto-transition on a decrease,
+  // so this DOES invalidate the funds cache.
+  const editAmount = useCallback(
+    (payload) => runMutation(cashDisbursementApi.editAmount, payload),
+    [runMutation],
+  )
+
+  /**
+   * Combined save used by EditCashDisbursementModal: that modal collects
+   * both metadata fields (received_by/department_id/particulars/
+   * cash_voucher) and amount_issued in one form, but the backend
+   * deliberately splits these into two endpoints — upsertCashDisbursement
+   * (metadata only) and editCashDisbursementAmount (amount, with its own
+   * difference-based recalculation against the fund/budget). This runs
+   * both, but only calls editAmount when the amount actually changed
+   * (matches "difference === 0 -> no financial records touched" from the
+   * backend's own contract, and avoids an unnecessary extra request /
+   * activity-log entry on every metadata-only edit).
+   *
+   * If metadata succeeds but the amount edit fails (e.g. insufficient
+   * fund balance for an increase), metadata changes are NOT rolled back —
+   * they're a separate transaction on the backend. The returned message
+   * surfaces the amount-edit failure so the user knows to retry just the
+   * amount field; the modal stays open (see its handleSubmit) since the
+   * overall result is reported as a failure.
+   */
+  const saveDisbursement = useCallback(
+    async ({ originalAmount, ...payload }) => {
+      const metaResult = await updateMetadata({
+        id: payload.id,
+        received_by: payload.received_by,
+        department_id: payload.department_id,
+        particulars: payload.particulars,
+        cash_voucher: payload.cash_voucher,
+      })
+
+      if (!metaResult.success) {
+        return metaResult
+      }
+
+      const newAmount = parseFloat(payload.amount_issued)
+      const oldAmount = parseFloat(originalAmount)
+      const amountChanged = !isNaN(newAmount) && !isNaN(oldAmount) && newAmount !== oldAmount
+
+      if (!amountChanged) {
+        return metaResult
+      }
+
+      const amountResult = await editAmount({
+        id: payload.id,
+        amount_issued: newAmount,
+      })
+
+      if (!amountResult.success) {
+        return {
+          success: false,
+          message: `Details saved, but the amount change failed: ${amountResult.message}`,
+        }
+      }
+
+      return amountResult
+    },
+    [updateMetadata, editAmount],
   )
 
   /**
@@ -195,6 +262,8 @@ export function useCashDisbursements(initialParams = {}) {
     recordExpended,
     reimburse,
     updateMetadata,
+    editAmount,
+    saveDisbursement,
     submitLiquidation,
   }
 }
