@@ -43,7 +43,8 @@ function useBudgets() {
     if (!Array.isArray(rawRevolvingFunds)) return totals
     rawRevolvingFunds.forEach((fund) => {
       const budgetId = fund.budget_id
-      const deployed = Number(fund.total_fund ?? 0)
+      // const deployed = Number(fund.total_fund ?? 0)
+      const deployed = Number(fund.balance ?? 0) + Number(fund.outstanding ?? 0)
       totals[budgetId] = (totals[budgetId] || 0) + deployed
     })
     return totals
