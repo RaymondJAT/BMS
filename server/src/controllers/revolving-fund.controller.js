@@ -458,7 +458,17 @@ const upsertRevolvingFund = async (req, res) => {
 
 /**
  * @name upsertClosedRevolvingFund
- * @description Submit or Report Revolving Fund reconciliation (Sets SubmitRevolvingFund status to BALANCED/SHORT/OVER, and updates parent fund to CLOSED/CLEARED)
+ * @description Submit/Report a Revolving Fund = CLOSE and SURRENDER it.
+ *              Returns the fund's current rf_balance (remaining cash not
+ *              committed to any Cash Disbursement) to its connected Budget,
+ *              zeroes rf_balance, and sets status to CLOSED — never
+ *              CLEARED directly, even with zero outstanding disbursements.
+ *              Existing UNLIQUIDATED Cash Disbursements are left untouched
+ *              and can still be liquidated afterward (see
+ *              cashDisbursementController.js), which is the only path that
+ *              can later move this fund from CLOSED to CLEARED. Blocked
+ *              entirely if the fund is already CLOSED/CLEARED, so the same
+ *              remaining cash can never be returned twice.
  */
 const upsertClosedRevolvingFund = async (req, res) => {
   const userId = req.userId || req.user?.id || req.body.created_by || 1
@@ -516,7 +526,7 @@ const upsertClosedRevolvingFund = async (req, res) => {
         return res.status(404).json({ message: 'Submitted Revolving Fund record not found' })
       }
     } else {
-      // Create new submission record
+      // Create new submission record = SURRENDER the Revolving Fund.
       if (!revolving_fund_id) {
         return res.status(400).json({ message: 'Missing required field: revolving_fund_id' })
       }
@@ -527,13 +537,57 @@ const upsertClosedRevolvingFund = async (req, res) => {
           ? status.toUpperCase()
           : 'BALANCED'
 
-      // Resolved before the insert since it only needs revolving_fund_id
-      // (already known), not the closed record's own generated id.
-      const fundDetails = await Query(`SELECT rf_outstanding FROM revolving_fund WHERE rf_id = ?`, [
-        revolving_fund_id,
-      ])
-      const outstandingAmount = fundDetails[0] ? parseNum(fundDetails[0].rf_outstanding) : 0
-      const targetParentStatus = outstandingAmount > 0 ? 'CLOSED' : 'CLEARED'
+      // Submitting/reporting a fund means CLOSING and SURRENDERING it. The
+      // fund's own rf_balance IS "remaining unused cash" — this codebase
+      // already maintains it incrementally everywhere else (issue debits
+      // it, a return/edit-decrease credits it back — see
+      // cashDisbursementController.js), so it's exactly "fund amount minus
+      // cash already committed to Cash Disbursements" with no extra
+      // computation. Fetched fresh here (never trusted from the client) so
+      // the amount actually swept to the budget can't be spoofed or stale.
+      const rf = await getRevolvingFundById(revolving_fund_id)
+      if (!rf) {
+        return res.status(404).json({ message: 'Revolving fund not found' })
+      }
+
+      const rfStatus = rf[Revolving.Fund.cols.status]
+      if (rfStatus === 'CLOSED' || rfStatus === 'CLEARED') {
+        return res.status(400).json({
+          message: `Revolving fund is already ${rfStatus} and cannot be submitted/surrendered again.`,
+        })
+      }
+
+      const remainingCash = Math.round(parseNum(rf[Revolving.Fund.cols.balance]) * 100) / 100
+
+      let budgetQueries = []
+      let budgetReturnRemark = null
+
+      if (remainingCash > 0) {
+        const budgetId = rf[Revolving.Fund.cols.budget_id]
+        const budgetRow = budgetId ? await getBudgetById(budgetId) : null
+
+        if (!budgetRow) {
+          return res.status(400).json({
+            message: `Associated budget ${budgetId ?? '(none)'} not found — cannot return remaining cash.`,
+          })
+        }
+
+        if (budgetRow[Budget.Budget.cols.status] === 'CLOSED') {
+          return res.status(400).json({
+            message: 'Cannot surrender this fund because its connected budget is CLOSED.',
+          })
+        }
+
+        budgetQueries = buildBudgetChangeQueries(
+          budgetRow,
+          remainingCash,
+          budgetRow[Budget.Budget.cols.department_id],
+          userId,
+          `Remaining cash surrendered from Revolving Fund #${revolving_fund_id} on submit/report — ₱${remainingCash.toFixed(2)} returned.`,
+        )
+
+        budgetReturnRemark = `₱${remainingCash.toFixed(2)} returned to Budget #${budgetId}.`
+      }
 
       // crf_id is an autoincrement INTEGER — nothing downstream actually
       // needs it (the parent-status update and activity log only need
@@ -560,9 +614,20 @@ const upsertClosedRevolvingFund = async (req, res) => {
       closedRecordId = insertResult.insertId
 
       try {
+        // The fund ALWAYS becomes CLOSED here — never CLEARED directly,
+        // even with zero outstanding Cash Disbursements (Test 1). CLEARED
+        // is reached exclusively later, via the CD-liquidation auto-
+        // transition in cashDisbursementController.js
+        // (resolveClosedFundStatus) — submit/report never liquidates any
+        // Cash Disbursement itself, so it never skips straight to CLEARED.
         const updateParentQuery = SQL.model(Revolving.Fund)
           .update({
-            [Revolving.Fund.cols.status]: targetParentStatus,
+            [Revolving.Fund.cols.status]: 'CLOSED',
+            // Swept to 0 — the actual source-of-truth fix that prevents a
+            // second submit from returning the same cash twice (on top of
+            // the CLOSED/CLEARED guard above, which blocks re-submission
+            // outright).
+            [Revolving.Fund.cols.balance]: 0,
             ...(end_date !== undefined ? { [Revolving.Fund.cols.end_date]: end_date } : {}),
           })
           .where(Revolving.Fund.pk, revolving_fund_id)
@@ -575,7 +640,8 @@ const upsertClosedRevolvingFund = async (req, res) => {
             .insert({
               [Revolving.FundActivity.cols.revolving_fund_id]: revolving_fund_id,
               [Revolving.FundActivity.cols.remarks]:
-                `Revolving Fund submitted/reported with reconciliation status: ${submitStatus}. Parent status changed to ${targetParentStatus}.`,
+                `Revolving Fund submitted/reported (reconciliation: ${submitStatus}) and surrendered. Status: CLOSED.` +
+                (budgetReturnRemark ? ` ${budgetReturnRemark}` : ' No remaining cash to return.'),
               [Revolving.FundActivity.cols.user_id]: userId,
             })
             .build()
@@ -583,12 +649,15 @@ const upsertClosedRevolvingFund = async (req, res) => {
           queries.push(toTxQuery(activityQuery))
         }
 
+        queries.push(...budgetQueries)
+
         await Transaction(queries)
       } catch (txError) {
         // Compensate: the closed-fund submission committed above, but
-        // updating the parent fund's status failed — remove the orphaned
-        // submission rather than leave a reconciliation record whose parent
-        // fund was never actually closed/cleared.
+        // updating the parent fund's status/balance (and returning cash
+        // to the budget) failed — remove the orphaned submission rather
+        // than leave a reconciliation record whose parent fund was never
+        // actually closed or credited back.
         try {
           const { sql: delSql, bindings: delBindings } = SQL.model(ClosedModel)
             .delete()

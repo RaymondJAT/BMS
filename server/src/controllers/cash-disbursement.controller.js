@@ -548,6 +548,13 @@ const editCashDisbursementAmount = async (req, res) => {
         return res.status(400).json({ message: `Associated budget ${budgetId} not found.` })
       }
 
+      if (budgetRow[Budget.Budget.cols.status] === 'CLOSED') {
+        return res.status(400).json({
+          message:
+            "Cannot recalculate this disbursement's amount because its connected budget is CLOSED.",
+        })
+      }
+
       const currentBudgetAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
       if (difference > 0 && currentBudgetAmount < difference) {
         return res
