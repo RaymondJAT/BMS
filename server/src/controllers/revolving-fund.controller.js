@@ -80,41 +80,24 @@ const getRevolvingFundById = async (id) => {
 }
 
 /**
- * Builds the budget update + budget_history insert as Transaction-ready
- * query objects, WITHOUT executing them, using the Budget model (not raw
- * SQL) so this stays consistent with the Budget and Cash Disbursement
- * controllers' source of truth.
- *
- * @param {object} budgetRow - row previously fetched via getBudgetById
- * @param {number} delta - positive to credit (increase budget), negative to
- *   debit (decrease budget). Money DEPLOYED from the budget into a fund is
- *   always a debit (negative); money returned to the budget is a credit
- *   (positive). Matches the convention used in cashDisbursementController.js.
+ * The LIVE "how much of this budget is currently deployed into Revolving
+ * Funds" figure — SUM(rf_balance + rf_outstanding) across every fund tied
+ * to the budget. This is money currently outside Finance's control, either
+ * sitting idle in a fund's balance or still out with a Requester as an
+ * unresolved cash_disbursement. It automatically shrinks when a fund
+ * closes (balance sweeps to 0) or a disbursement is returned, and grows on
+ * top-up or issue — no manual bookkeeping required (matches
+ * getBudgetBudget in budgetController.js, which surfaces the same figure
+ * for display; this copy exists purely for server-side sufficiency checks
+ * at the moment of mutation, before the client's cached copy could
+ * possibly reflect the change).
  */
-const buildBudgetChangeQueries = (budgetRow, delta, departmentId, userId, remarks) => {
-  const previousAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
-  const newAmount = previousAmount + delta
-
-  const updateQuery = SQL.model(Budget.Budget)
-    .update({ [Budget.Budget.cols.amount]: newAmount })
-    .where(Budget.Budget.pk, budgetRow[Budget.Budget.cols.id])
-    .build()
-
-  const historyQuery = SQL.model(Budget.History)
-    .insert({
-      [Budget.History.cols.budget_id]: budgetRow[Budget.Budget.cols.id],
-      [Budget.History.cols.amount]: Math.abs(delta),
-      [Budget.History.cols.previous_amount]: previousAmount,
-      [Budget.History.cols.new_amount]: newAmount,
-      [Budget.History.cols.remarks]: remarks || null,
-      [Budget.History.cols.department_id]: departmentId,
-      [Budget.History.cols.type]: budgetRow[Budget.Budget.cols.type],
-      [Budget.History.cols.date]: new Date(),
-      [Budget.History.cols.created_by]: userId,
-    })
-    .build()
-
-  return [toTxQuery(updateQuery), toTxQuery(historyQuery)]
+const getDeployedAmountForBudget = async (budgetId) => {
+  const rows = await Query(
+    `SELECT COALESCE(SUM(rf_balance + rf_outstanding), 0) AS deployed FROM revolving_fund WHERE rf_budget_id = ?`,
+    [budgetId],
+  )
+  return parseNum(rows[0]?.deployed)
 }
 
 /**
@@ -142,11 +125,23 @@ const hasUnliquidatedDisbursements = async (fundId) => {
 
 /**
  * @name upsertRevolvingFund
- * @description Create or update a Revolving Fund entry
+ * @description Create or update a Revolving Fund entry.
+ *
+ *              IMPORTANT: neither creating nor topping up a fund writes
+ *              anything to the connected Budget row anymore. budget.b_amount
+ *              is Finance's ledger (see budgetController.js) and is never
+ *              touched by Revolving Fund activity — instead, both flows
+ *              below VALIDATE against a live "remaining budget" computed
+ *              as Total Budget minus the actual current SUM of every
+ *              fund's balance+outstanding for that budget (see
+ *              getDeployedAmountForBudget). This means the Budget's
+ *              Deployed/Remaining figures are always exactly reproducible
+ *              from the fund rows themselves — never a separately
+ *              maintained counter that can drift.
  */
 const upsertRevolvingFund = async (req, res) => {
   // #swagger.tags = ['Revolving Fund']
-  // #swagger.description = 'Create a new Revolving Fund or update an existing one.'
+  // #swagger.description = 'Create a new Revolving Fund or update an existing one. Validates against — but never writes to — the connected Budget.'
   // #swagger.autoBody = false
   // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
 
@@ -219,7 +214,6 @@ const upsertRevolvingFund = async (req, res) => {
       // intentionally takes precedence over any raw added/total_fund/
       // balance fields set from the request above.
       const topUpAmount = add_amount !== undefined ? parseNum(add_amount) : 0
-      let budgetChangeQueries = []
       let topUpRemarks = null
 
       if (topUpAmount > 0) {
@@ -243,23 +237,17 @@ const upsertRevolvingFund = async (req, res) => {
             .json({ message: `Associated budget ${fundBudgetId} not found for top-up.` })
         }
 
-        const currentBudgetAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
-        if (currentBudgetAmount < topUpAmount) {
+        // Sufficiency check against the LIVE remaining budget (Total minus
+        // everything currently deployed across ALL this budget's funds,
+        // including this one's own current stake) — never against a
+        // manually-maintained b_amount wallet.
+        const totalBudget = parseNum(budgetRow[Budget.Budget.cols.amount])
+        const existingDeployed = await getDeployedAmountForBudget(fundBudgetId)
+        const remainingBudget = totalBudget - existingDeployed
+
+        if (remainingBudget < topUpAmount) {
           return res.status(400).json({ message: 'Insufficient budget amount balance for top-up.' })
         }
-
-        // Deploying money from the budget into a fund DEBITS the budget
-        // (money leaves the available pool and becomes locked in the
-        // fund) — mirrors the convention used everywhere in
-        // cashDisbursementController.js (issue/reimburse debit the
-        // budget, returns credit it).
-        budgetChangeQueries = buildBudgetChangeQueries(
-          budgetRow,
-          -topUpAmount,
-          budgetRow[Budget.Budget.cols.department_id],
-          userId,
-          `Top-up for Revolving Fund #${id}`,
-        )
 
         topUpRemarks = `Topped up ₱${topUpAmount.toFixed(2)} — added (${newAdded}), total fund (${newTotalFund}), balance (${newBalance}).`
       }
@@ -275,8 +263,8 @@ const upsertRevolvingFund = async (req, res) => {
 
       // The RF update and its activity log both reference an id we already
       // know (no generated-id dependency), so they batch into one real,
-      // all-or-nothing transaction — along with the budget effect queries
-      // when this update is a top-up.
+      // all-or-nothing transaction. No budget queries are ever appended
+      // here — see this function's docstring.
       const queries = [toTxQuery(query)]
 
       if (Revolving.FundActivity) {
@@ -292,8 +280,6 @@ const upsertRevolvingFund = async (req, res) => {
 
         queries.push(toTxQuery(activityQuery))
       }
-
-      queries.push(...budgetChangeQueries)
 
       await Transaction(queries)
 
@@ -362,11 +348,14 @@ const upsertRevolvingFund = async (req, res) => {
 
       // Both beginning and added leave the budget's available pool and
       // become locked in the fund, so both must be covered by the
-      // budget's current balance — not beginning alone.
+      // budget's current REMAINING balance — not raw b_amount, and not
+      // beginning alone.
       const deployedAmount = beginningAmount + addedAmount
-      const currentBudgetAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
+      const totalBudget = parseNum(budgetRow[Budget.Budget.cols.amount])
+      const existingDeployed = await getDeployedAmountForBudget(budget_id)
+      const remainingBudget = totalBudget - existingDeployed
 
-      if (currentBudgetAmount < deployedAmount) {
+      if (remainingBudget < deployedAmount) {
         return res.status(400).json({ message: 'Insufficient budget amount balance.' })
       }
 
@@ -379,9 +368,9 @@ const upsertRevolvingFund = async (req, res) => {
 
       const initialStatus = status || (initialIssued > 0 ? 'ON REVIEW' : 'OPEN')
 
-      // rf_id is an autoincrement INTEGER. Everything below (activity log,
-      // budget update) needs this generated id, and Transaction() can't
-      // return generated ids mid-batch, so this insert stays standalone.
+      // rf_id is an autoincrement INTEGER. The activity log below needs
+      // this generated id, and Transaction() can't return generated ids
+      // mid-batch, so this insert stays standalone.
       const insertFundQuery = SQL.model(Revolving.Fund)
         .insert({
           [Revolving.Fund.cols.budget_id]: budget_id,
@@ -425,29 +414,13 @@ const upsertRevolvingFund = async (req, res) => {
           queries.push(toTxQuery(activityQuery))
         }
 
-        // Deploying money from the budget into a new fund DEBITS the
-        // budget — money leaves the available pool. Covers both the
-        // initial `beginning` balance and any `added` amount, since both
-        // represent money moving out of the budget at creation time.
-        if (deployedAmount > 0) {
-          queries.push(
-            ...buildBudgetChangeQueries(
-              budgetRow,
-              -deployedAmount,
-              departmentId,
-              userId,
-              `Initial funding for Revolving Fund #${newFundId}`,
-            ),
-          )
-        }
-
         if (queries.length > 0) {
           await Transaction(queries)
         }
       } catch (txError) {
-        // Compensate: the RF row committed above, but the downstream batch
-        // failed — remove the orphaned RF row so we don't leave a fund with
-        // no matching activity log / budget effect.
+        // Compensate: the RF row committed above, but its activity log
+        // insert failed — remove the orphaned RF row so we don't leave a
+        // fund with no matching activity log.
         try {
           const { sql: delSql, bindings: delBindings } = SQL.model(Revolving.Fund)
             .delete()
@@ -479,16 +452,21 @@ const upsertRevolvingFund = async (req, res) => {
 /**
  * @name upsertClosedRevolvingFund
  * @description Submit/Report a Revolving Fund = CLOSE and SURRENDER it.
- *              Returns the fund's current rf_balance (remaining cash not
- *              committed to any Cash Disbursement) to its connected Budget,
- *              zeroes rf_balance, and sets status to CLOSED — never
- *              CLEARED directly, even with zero outstanding disbursements.
- *              Existing UNLIQUIDATED Cash Disbursements are left untouched
- *              and can still be liquidated afterward (see
- *              cashDisbursementController.js), which is the only path that
- *              can later move this fund from CLOSED to CLEARED. Blocked
- *              entirely if the fund is already CLOSED/CLEARED, so the same
- *              remaining cash can never be returned twice.
+ *              Zeroes rf_balance and records the counted amount in
+ *              rf_ending (purely descriptive — what was actually on hand
+ *              at closure). Sets status to CLOSED if the fund still has
+ *              unliquidated Cash Disbursements of its own, or straight to
+ *              CLEARED if it doesn't (see hasUnliquidatedDisbursements).
+ *
+ *              IMPORTANT: this does NOT credit anything back to the
+ *              connected Budget. It doesn't need to — the Budget's
+ *              Deployed/Remaining figures are computed live as
+ *              SUM(rf_balance + rf_outstanding) across the budget's funds
+ *              (see getBudgetBudget in budgetController.js), so the moment
+ *              this fund's balance is swept to 0 here, that money is
+ *              automatically reflected as available again in the Budget's
+ *              Remaining figure — no separate ledger transfer required, and
+ *              no risk of crediting the same money back twice.
  */
 const upsertClosedRevolvingFund = async (req, res) => {
   const userId = req.userId || req.user?.id || req.body.created_by || 1
@@ -557,14 +535,6 @@ const upsertClosedRevolvingFund = async (req, res) => {
           ? status.toUpperCase()
           : 'BALANCED'
 
-      // Submitting/reporting a fund means CLOSING and SURRENDERING it. The
-      // fund's own rf_balance IS "remaining unused cash" — this codebase
-      // already maintains it incrementally everywhere else (issue debits
-      // it, a return/edit-decrease credits it back — see
-      // cashDisbursementController.js), so it's exactly "fund amount minus
-      // cash already committed to Cash Disbursements" with no extra
-      // computation. Fetched fresh here (never trusted from the client) so
-      // the amount actually swept to the budget can't be spoofed or stale.
       const rf = await getRevolvingFundById(revolving_fund_id)
       if (!rf) {
         return res.status(404).json({ message: 'Revolving fund not found' })
@@ -577,37 +547,11 @@ const upsertClosedRevolvingFund = async (req, res) => {
         })
       }
 
+      // Descriptive only — what was actually counted at closure. Not
+      // transferred anywhere; the Budget derives its own Remaining figure
+      // live from rf_balance/rf_outstanding, so simply zeroing rf_balance
+      // below is what actually "returns" this money to the Budget's view.
       const remainingCash = Math.round(parseNum(rf[Revolving.Fund.cols.balance]) * 100) / 100
-
-      let budgetQueries = []
-      let budgetReturnRemark = null
-
-      if (remainingCash > 0) {
-        const budgetId = rf[Revolving.Fund.cols.budget_id]
-        const budgetRow = budgetId ? await getBudgetById(budgetId) : null
-
-        if (!budgetRow) {
-          return res.status(400).json({
-            message: `Associated budget ${budgetId ?? '(none)'} not found — cannot return remaining cash.`,
-          })
-        }
-
-        if (budgetRow[Budget.Budget.cols.status] === 'CLOSED') {
-          return res.status(400).json({
-            message: 'Cannot surrender this fund because its connected budget is CLOSED.',
-          })
-        }
-
-        budgetQueries = buildBudgetChangeQueries(
-          budgetRow,
-          remainingCash,
-          budgetRow[Budget.Budget.cols.department_id],
-          userId,
-          `Remaining cash surrendered from Revolving Fund #${revolving_fund_id} on submit/report — ₱${remainingCash.toFixed(2)} returned.`,
-        )
-
-        budgetReturnRemark = `₱${remainingCash.toFixed(2)} returned to Budget #${budgetId}.`
-      }
 
       // crf_id is an autoincrement INTEGER — nothing downstream actually
       // needs it (the parent-status update and activity log only need
@@ -663,7 +607,9 @@ const upsertClosedRevolvingFund = async (req, res) => {
               [Revolving.FundActivity.cols.revolving_fund_id]: revolving_fund_id,
               [Revolving.FundActivity.cols.remarks]:
                 `Revolving Fund submitted/reported (reconciliation: ${submitStatus}) and surrendered. Status: ${newFundStatus}.` +
-                (budgetReturnRemark ? ` ${budgetReturnRemark}` : ' No remaining cash to return.'),
+                (remainingCash > 0
+                  ? ` ₱${remainingCash.toFixed(2)} balance released back to the connected Budget's available pool.`
+                  : ' No remaining cash to release.'),
               [Revolving.FundActivity.cols.user_id]: userId,
             })
             .build()
@@ -671,15 +617,12 @@ const upsertClosedRevolvingFund = async (req, res) => {
           queries.push(toTxQuery(activityQuery))
         }
 
-        queries.push(...budgetQueries)
-
         await Transaction(queries)
       } catch (txError) {
         // Compensate: the closed-fund submission committed above, but
-        // updating the parent fund's status/balance (and returning cash
-        // to the budget) failed — remove the orphaned submission rather
-        // than leave a reconciliation record whose parent fund was never
-        // actually closed or credited back.
+        // updating the parent fund's status/balance failed — remove the
+        // orphaned submission rather than leave a reconciliation record
+        // whose parent fund was never actually closed.
         try {
           const { sql: delSql, bindings: delBindings } = SQL.model(ClosedModel)
             .delete()

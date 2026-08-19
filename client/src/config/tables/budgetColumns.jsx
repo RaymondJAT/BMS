@@ -3,20 +3,11 @@ import { Eye, Edit2, Trash2 } from 'lucide-react'
 /**
  * Builds the DataTable column definitions for the Budget Management table.
  *
- * Note on the money columns: budget.amount (row.amount) is a LIVE
- * available balance — the "wallet." It's debited when a Revolving Fund is
- * created/topped-up, and credited only by a fresh budget top-up. It does
- * NOT move when cash is issued/returned/reimbursed between a fund and an
- * employee — that's fund-internal (see cashDisbursementController.js).
- * useBudgets derives:
- *   - row.deployedToFunds = sum of `total_fund` across this budget's
- *     Revolving Funds (money currently locked in fund custody, whether
- *     idle balance or out with an employee)
- *   - row.allocated = row.amount + row.deployedToFunds (reconstructed
- *     total pool — stays flat across disbursement activity, only moves at
- *     fund funding/top-up time or a budget top-up)
- * so Allocated / Deployed to Revolving Funds / Remaining / Utilization
- * all stay internally consistent.
+ * All money figures below come straight from budgetController.js's
+ * getBudgetBudget, which derives every one of them LIVE from the actual
+ * revolving_fund / cash_disbursement rows (see that function's docstring
+ * for the full breakdown). Nothing here is recomputed client-side beyond
+ * simple display formatting.
  *
  * @param {Object} handlers
  * @param {(row: object) => string} handlers.getDepartmentName
@@ -25,6 +16,9 @@ import { Eye, Edit2, Trash2 } from 'lucide-react'
  * @param {(row: object, e: Event) => void} handlers.onDelete
  */
 export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, onDelete }) {
+  const formatCurrency = (val) =>
+    `₱${parseFloat(val || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}`
+
   return [
     {
       header: 'Code / Dept',
@@ -66,45 +60,65 @@ export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, 
       ),
     },
     {
-      header: 'Allocated Amount',
-      accessorKey: 'allocated',
+      header: 'Budget Allocation',
+      accessorKey: 'total_budget',
       sortable: true,
       align: 'right',
       cell: (row) => {
-        const allocated = parseFloat(row.allocated || 0)
+        const beginning = parseFloat(row.beginning_amount || 0)
+        const additional = parseFloat(row.additional_allocation || 0)
+        const total = parseFloat(row.total_budget || 0)
+
         return (
-          <span className="font-semibold text-slate-900">
-            ₱{allocated.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </span>
+          <div>
+            <div className="font-bold text-slate-900 text-sm">{formatCurrency(total)}</div>
+            {additional > 0 ? (
+              <div className="text-[10px] text-emerald-600 font-medium">
+                Beginning {formatCurrency(beginning)} + {formatCurrency(additional)} added
+              </div>
+            ) : (
+              <div className="text-[10px] text-slate-400">
+                Beginning: {formatCurrency(beginning)}
+              </div>
+            )}
+          </div>
         )
       },
     },
     {
       header: 'Deployed to Revolving Funds',
-      accessorKey: 'deployedToFunds',
+      accessorKey: 'deployed_to_revolving_funds',
       sortable: true,
       align: 'right',
       cell: (row) => {
-        const deployed = parseFloat(row.deployedToFunds || 0)
+        const deployed = parseFloat(row.deployed_to_revolving_funds || 0)
+        const utilized = parseFloat(row.cash_disbursement_utilized || 0)
+        const cdUtilPercent = parseFloat(row.cash_disbursement_utilization_percent || 0)
+
         return (
-          <span className="font-medium text-slate-700">
-            ₱{deployed.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-          </span>
+          <div>
+            <span className="font-medium text-slate-700">{formatCurrency(deployed)}</span>
+            {deployed > 0 && (
+              <div className="text-[10px] text-slate-400">
+                {formatCurrency(utilized)} actually disbursed ({cdUtilPercent.toFixed(1)}%)
+              </div>
+            )}
+          </div>
         )
       },
     },
     {
       header: 'Remaining',
+      accessorKey: 'remaining_budget',
+      sortable: true,
       align: 'right',
       cell: (row) => {
-        const allocated = parseFloat(row.allocated || 0)
-        const deployed = parseFloat(row.deployedToFunds || 0)
-        const remaining = allocated - deployed
+        const remaining = parseFloat(row.remaining_budget || 0)
         const isNegative = remaining < 0
 
         return (
           <span className={`font-bold ${isNegative ? 'text-[#E31837]' : 'text-slate-900'}`}>
-            ₱{remaining.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {formatCurrency(remaining)}
           </span>
         )
       },
@@ -113,21 +127,20 @@ export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, 
       header: 'Utilization',
       align: 'center',
       cell: (row) => {
-        const allocated = parseFloat(row.allocated || 0)
-        const deployed = parseFloat(row.deployedToFunds || 0)
-        const rawPercentage = allocated > 0 ? Math.round((deployed / allocated) * 100) : 0
-        const barWidth = Math.min(rawPercentage, 100)
-        const isOver = deployed > allocated
+        const percentage = parseFloat(row.utilization_percent || 0)
+        const rounded = Math.round(percentage)
+        const barWidth = Math.min(rounded, 100)
+        const isOver = percentage > 100
 
         return (
           <div className="w-28 space-y-1">
             <div className="flex justify-between text-xs font-semibold text-slate-600">
-              <span>{rawPercentage}%</span>
+              <span>{rounded}%</span>
             </div>
             <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all ${
-                  isOver ? 'bg-[#E31837]' : rawPercentage > 85 ? 'bg-amber-500' : 'bg-emerald-500'
+                  isOver ? 'bg-[#E31837]' : rounded > 85 ? 'bg-amber-500' : 'bg-emerald-500'
                 }`}
                 style={{ width: `${barWidth}%` }}
               />

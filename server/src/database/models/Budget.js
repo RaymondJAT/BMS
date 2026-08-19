@@ -8,6 +8,7 @@
  * @property {'b_department_id'} department_id
  * @property {'b_type'} type
  * @property {'b_amount'} amount
+ * @property {'b_beginning_amount'} beginning_amount
  * @property {'b_status'} status
  * @property {'b_createdBy'} createdBy
  * @property {'b_createdAt'} createdAt
@@ -39,12 +40,13 @@ const Budget = {
       department_id: 'b_department_id',
       type: 'b_type',
       amount: 'b_amount',
+      beginning_amount: 'b_beginning_amount',
       status: 'b_status',
       createdBy: 'b_createdBy',
       createdAt: 'b_createdAt',
     },
-    select: ['b_id', 'b_department_id', 'b_type', 'b_amount', 'b_status', 'b_createdBy', 'b_createdAt'],
-    insert: ['b_department_id', 'b_type', 'b_amount', 'b_status', 'b_createdBy'],
+    select: ['b_id', 'b_department_id', 'b_type', 'b_amount', 'b_beginning_amount', 'b_status', 'b_createdBy', 'b_createdAt'],
+    insert: ['b_department_id', 'b_type', 'b_amount', 'b_beginning_amount', 'b_status', 'b_createdBy'],
   },
   History: {
     table: 'budget_history',

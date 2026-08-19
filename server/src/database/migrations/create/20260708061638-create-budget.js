@@ -29,6 +29,10 @@ module.exports = {
         type: Sequelize.DECIMAL(10, 2),
         allowNull: false,
       },
+      b_beginning_amount: {
+        type: Sequelize.DECIMAL(10, 2),
+        allowNull: false,
+      },
       b_status: {
         type: Sequelize.ENUM('ACTIVE', 'EXHAUSTED', 'CLOSED'),
         allowNull: false,

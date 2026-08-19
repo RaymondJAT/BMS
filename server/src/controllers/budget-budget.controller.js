@@ -27,6 +27,23 @@ const toTxQuery = ({ sql, bindings }) => ({ sql, values: bindings })
  * @name upsertBudgetBudget
  * @description Create a new budget or top-up/update an existing budget.
  *              Automatically records entries into Budget History.
+ *
+ *              b_amount is THE Total Budget figure (Beginning + every
+ *              Finance-driven top-up made through this endpoint). It is
+ *              deliberately NEVER touched anywhere else in the codebase —
+ *              not by Revolving Fund creation/top-up/closure, not by Cash
+ *              Disbursement amount edits (see revolvingFundController.js
+ *              and cashDisbursementController.js). Those flows instead
+ *              validate against a LIVE "remaining budget" computed as
+ *              Total Budget minus the actual current sum of Revolving Fund
+ *              balance+outstanding for that budget — never by writing to
+ *              this row — so it can never drift out of sync with reality.
+ *
+ *              b_beginning_amount is set ONCE at creation and never
+ *              changes again, even on subsequent top-ups. Additional
+ *              Allocation is therefore always derivable as
+ *              (b_amount - b_beginning_amount), with no separate ledger
+ *              needed for it.
  */
 const upsertBudgetBudget = async (req, res) => {
   // #swagger.tags = ['Budget']
@@ -56,7 +73,7 @@ const upsertBudgetBudget = async (req, res) => {
       in: 'formData',
       type: 'number',
       required: true,
-      description: 'Budget allocation amount'
+      description: 'Budget allocation amount (initial amount on create, additional top-up amount on update)'
     }
     #swagger.parameters['date'] = {
       in: 'formData',
@@ -86,6 +103,7 @@ const upsertBudgetBudget = async (req, res) => {
         .select([
           Budget.Budget.cols.id,
           Budget.Budget.cols.amount,
+          Budget.Budget.cols.beginning_amount,
           Budget.Budget.cols.status,
           Budget.Budget.cols.department_id,
         ])
@@ -111,6 +129,8 @@ const upsertBudgetBudget = async (req, res) => {
       if (department_id !== undefined) updateData[Budget.Budget.cols.department_id] = department_id
       if (type !== undefined) updateData[Budget.Budget.cols.type] = type
       if (amount !== undefined) updateData[Budget.Budget.cols.amount] = newTotalAmount
+      // b_beginning_amount is intentionally NEVER included here — it's
+      // fixed at creation for the lifetime of the budget.
 
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ message: 'No valid data provided for update' })
@@ -165,6 +185,9 @@ const upsertBudgetBudget = async (req, res) => {
         [Budget.Budget.cols.department_id]: department_id,
         [Budget.Budget.cols.type]: type || 'CASH',
         [Budget.Budget.cols.amount]: initialAmount,
+        // Beginning Amount = the initial allocation, fixed for good —
+        // equal to amount only at this instant of creation.
+        [Budget.Budget.cols.beginning_amount]: initialAmount,
         [Budget.Budget.cols.status]: 'ACTIVE',
         [Budget.Budget.cols.createdBy]: userId,
       })
@@ -265,11 +288,42 @@ const softDeleteBudget = async (req, res) => {
 
 /**
  * @name getBudgetBudget
- * @description Get active Budget records (excludes CLOSED by default)
+ * @description Get active Budget records (excludes CLOSED by default),
+ *              each enriched with every derived financial figure computed
+ *              LIVE from the actual revolving_fund / cash_disbursement
+ *              rows — never from a manually-maintained counter:
+ *
+ *              - beginning_amount: fixed at creation, never changes.
+ *              - amount / total_budget: Beginning + all Finance top-ups
+ *                (the only thing that ever writes to b_amount).
+ *              - additional_allocation: total_budget - beginning_amount.
+ *              - deployed_to_revolving_funds: SUM(rf_balance +
+ *                rf_outstanding) across every fund tied to this budget —
+ *                money currently locked outside Finance's control, whether
+ *                idle in a fund or still out with a Requester. Naturally
+ *                shrinks when a fund closes (balance sweeps to 0) or a
+ *                disbursement is returned; naturally grows on top-up or
+ *                issue. This is what actually gates new Revolving Fund
+ *                creation/top-up (see revolvingFundController.js).
+ *              - remaining_budget: total_budget - deployed_to_revolving_funds.
+ *              - utilization_percent: deployed_to_revolving_funds /
+ *                total_budget * 100.
+ *              - cash_disbursement_utilized: SUM(cd_amount_issued -
+ *                cd_amount_returned) across every disbursement whose
+ *                ORIGINAL fund belongs to this budget — a SUBSET of
+ *                deployed_to_revolving_funds representing money that has
+ *                actually left a fund into a Requester's hands and hasn't
+ *                been given back. Shown as a separate, additional metric
+ *                (per the Deployment-vs-Utilization distinction) — never
+ *                subtracted a second time from total_budget, to avoid
+ *                double-counting the same money against two different
+ *                totals.
+ *              - cash_disbursement_utilization_percent:
+ *                cash_disbursement_utilized / deployed_to_revolving_funds * 100.
  */
 const getBudgetBudget = async (req, res) => {
   // #swagger.tags = ['Budget']
-  // #swagger.description = 'Get all Budget records (filters out CLOSED unless requested)'
+  // #swagger.description = 'Get all Budget records (filters out CLOSED unless requested), enriched with live-derived deployed/remaining/utilization figures'
   /* 
     #swagger.parameters['includeClosed'] = {
       in: 'query',
@@ -282,21 +336,58 @@ const getBudgetBudget = async (req, res) => {
   const { includeClosed } = req.query
 
   try {
-    let queryBuilder = SQL.model(Budget.Budget).select([
-      Budget.Budget.cols.id,
-      Budget.Budget.cols.department_id,
-      Budget.Budget.cols.type,
-      Budget.Budget.cols.amount,
-      Budget.Budget.cols.status,
-      Budget.Budget.cols.createdAt,
-    ])
+    const whereClause = includeClosed === 'true' ? '' : `WHERE b.b_status != 'CLOSED'`
 
-    if (includeClosed !== 'true') {
-      queryBuilder = queryBuilder.where(Budget.Budget.cols.status, '!=', 'CLOSED')
-    }
+    const rows = await Query(`
+      SELECT
+        b.b_id AS id,
+        b.b_department_id AS department_id,
+        b.b_type AS type,
+        b.b_amount AS amount,
+        b.b_beginning_amount AS beginning_amount,
+        b.b_status AS status,
+        b.b_createdAt AS createdAt,
+        COALESCE(rf.deployed, 0) AS deployed_to_revolving_funds,
+        COALESCE(cd.utilized, 0) AS cash_disbursement_utilized
+      FROM budget b
+      LEFT JOIN (
+        SELECT rf_budget_id, SUM(rf_balance + rf_outstanding) AS deployed
+        FROM revolving_fund
+        GROUP BY rf_budget_id
+      ) rf ON rf.rf_budget_id = b.b_id
+      LEFT JOIN (
+        SELECT r.rf_budget_id, SUM(c.cd_amount_issued - c.cd_amount_returned) AS utilized
+        FROM cash_disbursement c
+        INNER JOIN revolving_fund r ON r.rf_id = c.cd_revolving_fund_id
+        GROUP BY r.rf_budget_id
+      ) cd ON cd.rf_budget_id = b.b_id
+      ${whereClause}
+    `)
 
-    const { sql, bindings } = queryBuilder.build()
-    const result = await Query(sql, bindings)
+    const result = rows.map((row) => {
+      const amount = Math.round(parseFloat(row.amount || 0) * 100) / 100
+      const beginningAmount = Math.round(parseFloat(row.beginning_amount || 0) * 100) / 100
+      const additionalAllocation = Math.round((amount - beginningAmount) * 100) / 100
+      const deployed = Math.round(parseFloat(row.deployed_to_revolving_funds || 0) * 100) / 100
+      const utilized = Math.round(parseFloat(row.cash_disbursement_utilized || 0) * 100) / 100
+      const remaining = Math.round((amount - deployed) * 100) / 100
+      const utilizationPercent = amount > 0 ? Math.round((deployed / amount) * 10000) / 100 : 0
+      const cdUtilizationPercent =
+        deployed > 0 ? Math.round((utilized / deployed) * 10000) / 100 : 0
+
+      return {
+        ...row,
+        amount,
+        beginning_amount: beginningAmount,
+        additional_allocation: additionalAllocation,
+        total_budget: amount,
+        deployed_to_revolving_funds: deployed,
+        remaining_budget: remaining,
+        utilization_percent: utilizationPercent,
+        cash_disbursement_utilized: utilized,
+        cash_disbursement_utilization_percent: cdUtilizationPercent,
+      }
+    })
 
     return res.status(200).json(result)
   } catch (error) {
@@ -307,7 +398,11 @@ const getBudgetBudget = async (req, res) => {
 
 /**
  * @name getBudgetHistory
- * @description Get all Budget History audit records for a specific budget or overall
+ * @description Get all Budget History audit records for a specific budget or overall.
+ *              Since RF/CD flows no longer write to this table (see
+ *              upsertBudgetBudget's docstring), every row here is now
+ *              purely a Finance-driven allocation event: the initial
+ *              creation entry plus any subsequent top-ups.
  */
 const getBudgetHistory = async (req, res) => {
   // #swagger.tags = ['Budget']
