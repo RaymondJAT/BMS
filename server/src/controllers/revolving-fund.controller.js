@@ -2,6 +2,7 @@ const { Query, Transaction, SQLQueryBuilder } = require('../database/utilities/q
 const { Revolving } = require('../database/models/Revolving')
 const { Closed } = require('../database/models/Closed')
 const { Budget } = require('../database/models/Budget')
+const { Cash } = require('../database/models/Cash')
 
 const SQL = new SQLQueryBuilder()
 
@@ -114,6 +115,25 @@ const buildBudgetChangeQueries = (budgetRow, delta, departmentId, userId, remark
     .build()
 
   return [toTxQuery(updateQuery), toTxQuery(historyQuery)]
+}
+
+/**
+ * True if the given fund has any UNLIQUIDATED cash_disbursement rows that
+ * ORIGINATED from it (cd.revolving_fund_id === fundId). Since a
+ * disbursement's revolving_fund_id is always its ORIGINAL fund and never
+ * changes — even after a cross-fund return/reimburse liquidates it against
+ * a different fund (see returnCashDisbursement in
+ * cashDisbursementController.js) — this only counts a fund's own
+ * transactions, never ones it merely helped liquidate for another fund.
+ */
+const hasUnliquidatedDisbursements = async (fundId) => {
+  const { sql, bindings } = SQL.model(Cash.Disbursement)
+    .select([Cash.Disbursement.cols.id])
+    .where(Cash.Disbursement.cols.revolving_fund_id, fundId)
+    .where(Cash.Disbursement.cols.status, 'UNLIQUIDATED')
+    .build()
+  const rows = await Query(sql, bindings)
+  return rows.length > 0
 }
 
 // ==========================================
@@ -614,20 +634,22 @@ const upsertClosedRevolvingFund = async (req, res) => {
       closedRecordId = insertResult.insertId
 
       try {
-        // The fund ALWAYS becomes CLOSED here — never CLEARED directly,
-        // even with zero outstanding Cash Disbursements (Test 1). CLEARED
-        // is reached exclusively later, via the CD-liquidation auto-
-        // transition in cashDisbursementController.js
-        // (resolveClosedFundStatus) — submit/report never liquidates any
-        // Cash Disbursement itself, so it never skips straight to CLEARED.
+        // Status is decided by THIS fund's own outstanding transactions —
+        // not by whether it happened to be used as someone else's
+        // liquidation target. A disbursement counts toward a fund only via
+        // cd.revolving_fund_id (its ORIGINAL fund), so a fund that was only
+        // ever used to receive a cross-fund return/reimburse for another
+        // fund's disbursement has zero of its own and goes straight to
+        // CLEARED — it never passes through CLOSED. See
+        // hasUnliquidatedDisbursements above.
+        const hasOwnUnliquidated = await hasUnliquidatedDisbursements(revolving_fund_id)
+        const newFundStatus = hasOwnUnliquidated ? 'CLOSED' : 'CLEARED'
+
         const updateParentQuery = SQL.model(Revolving.Fund)
           .update({
-            [Revolving.Fund.cols.status]: 'CLOSED',
-            // Swept to 0 — the actual source-of-truth fix that prevents a
-            // second submit from returning the same cash twice (on top of
-            // the CLOSED/CLEARED guard above, which blocks re-submission
-            // outright).
+            [Revolving.Fund.cols.status]: newFundStatus,
             [Revolving.Fund.cols.balance]: 0,
+            [Revolving.Fund.cols.ending]: remainingCash,
             ...(end_date !== undefined ? { [Revolving.Fund.cols.end_date]: end_date } : {}),
           })
           .where(Revolving.Fund.pk, revolving_fund_id)
@@ -640,7 +662,7 @@ const upsertClosedRevolvingFund = async (req, res) => {
             .insert({
               [Revolving.FundActivity.cols.revolving_fund_id]: revolving_fund_id,
               [Revolving.FundActivity.cols.remarks]:
-                `Revolving Fund submitted/reported (reconciliation: ${submitStatus}) and surrendered. Status: CLOSED.` +
+                `Revolving Fund submitted/reported (reconciliation: ${submitStatus}) and surrendered. Status: ${newFundStatus}.` +
                 (budgetReturnRemark ? ` ${budgetReturnRemark}` : ' No remaining cash to return.'),
               [Revolving.FundActivity.cols.user_id]: userId,
             })

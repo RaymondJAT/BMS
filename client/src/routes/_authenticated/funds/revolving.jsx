@@ -353,6 +353,7 @@ function RevolvingFundPage() {
         onSubmit={handleCreateSubmit}
         isSubmitting={isCreating}
         budgets={budgets}
+        revolvingFunds={funds}
         isBudgetsLoading={isBudgetsLoading}
       />
 

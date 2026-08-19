@@ -20,12 +20,13 @@ function useRevolvingFunds(filters = {}) {
     if (!Array.isArray(rawFunds)) return []
     return rawFunds.map((item) => {
       const beginningVal = Number(item.beginning ?? item.baseCap ?? item.base_cap ?? 0)
-      // Backend field is `added` (rf_added) — `replenished` doesn't exist
-      // on the row, so this always evaluated to 0 before, undercounting
-      // totalCapacity for any fund that had ever been topped up.
       const replenishedVal = Number(item.added ?? item.replenished ?? 0)
       const issuedVal = Number(item.issued ?? item.total_issued ?? 0)
       const liquidatedVal = Number(item.liquidated ?? item.total_liquidated ?? 0)
+      const rawStatus = String(item.status || '').toUpperCase()
+      const isFinalized = rawStatus === 'CLOSED' || rawStatus === 'CLEARED' || rawStatus === 'CLEAR'
+      const endingVal = Number(item.ending ?? 0)
+      const liveBalanceVal = Number(item.balance ?? item.ending_balance ?? beginningVal)
 
       return {
         ...item,
@@ -36,12 +37,9 @@ function useRevolvingFunds(filters = {}) {
         replenished: replenishedVal,
         issued: issuedVal,
         liquidated: liquidatedVal,
-        // No unliquidated/total_unliquidated column exists on the backend
-        // row — it's always issued minus liquidated, computed here rather
-        // than read off a field that doesn't exist (which silently
-        // defaulted to 0 before, understating every fund's pending amount).
         unliquidated: Math.max(0, issuedVal - liquidatedVal),
-        balance: Number(item.balance ?? item.ending_balance ?? beginningVal),
+        balance: liveBalanceVal,
+        displayBalance: isFinalized ? endingVal : liveBalanceVal,
         start_date: item.start_date || null,
         end_date: item.end_date || null,
         status: item.status || 'Active',

@@ -203,7 +203,7 @@ export function createRevolvingColumns({
       sortable: true,
       align: 'right',
       cell: (row) => {
-        const balance = parseFloat(row.balance ?? row.endingBalance ?? 0)
+        const balance = parseFloat(row.displayBalance ?? row.balance ?? row.ending_balance ?? 0)
         const rawEnded = row.ended_amount ?? row.endedAmount
         const endedAmount =
           rawEnded !== undefined && rawEnded !== null ? parseFloat(rawEnded) : null

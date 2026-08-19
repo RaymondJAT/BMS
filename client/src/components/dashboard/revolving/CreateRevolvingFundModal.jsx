@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Modal } from '../../ui/Modal'
 
@@ -10,6 +10,7 @@ export default function CreateRevolvingFundModal({
   onSubmit,
   isSubmitting,
   budgets = [],
+  revolvingFunds = [],
   isBudgetsLoading = false,
 }) {
   const extractNumericValue = (val) => {
@@ -19,6 +20,18 @@ export default function CreateRevolvingFundModal({
     return !isNaN(num) && num > 0 ? num : ''
   }
 
+  // Filter out budgets that already have an associated revolving fund
+  const availableBudgets = useMemo(() => {
+    const existingFundBudgetIds = new Set(
+      revolvingFunds
+        .map((fund) => fund.budget_id || fund.budgetId || fund.source_budget_id)
+        .filter(Boolean)
+        .map(String),
+    )
+
+    return budgets.filter((b) => !existingFundBudgetIds.has(String(b.id)))
+  }, [budgets, revolvingFunds])
+
   const handleAmountKeyDown = (e) => {
     if (['e', 'E', '+', '-'].includes(e.key)) {
       e.preventDefault()
@@ -27,7 +40,7 @@ export default function CreateRevolvingFundModal({
 
   const handleBudgetChange = (e) => {
     const selectedId = e.target.value
-    const selectedBudget = budgets.find((b) => String(b.id) === String(selectedId))
+    const selectedBudget = availableBudgets.find((b) => String(b.id) === String(selectedId))
 
     if (selectedBudget) {
       const rawAmount =
@@ -115,7 +128,7 @@ export default function CreateRevolvingFundModal({
               <option value="">
                 {isBudgetsLoading ? 'Loading budget allocations...' : '-- Select Source Budget --'}
               </option>
-              {budgets.map((b) => (
+              {availableBudgets.map((b) => (
                 <option key={b.id} value={b.id}>
                   {b.title || b.name || b.budget_name || `Budget #${b.id}`}
                 </option>

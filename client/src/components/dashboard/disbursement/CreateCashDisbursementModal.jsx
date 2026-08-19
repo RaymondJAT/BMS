@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Modal } from '../../ui/Modal'
+
+const ELIGIBLE_LIQUIDATION_STATUSES = ['OPEN', 'ON REVIEW']
 
 export default function CreateCashDisbursementModal({
   isOpen,
@@ -21,6 +23,15 @@ export default function CreateCashDisbursementModal({
     amount_issued: '',
   })
   const [formError, setFormError] = useState(null)
+
+  // Filter funds to only include active/eligible statuses
+  const eligibleFunds = useMemo(
+    () =>
+      revolvingFunds.filter((fund) =>
+        ELIGIBLE_LIQUIDATION_STATUSES.includes(String(fund.status || '').toUpperCase()),
+      ),
+    [revolvingFunds],
+  )
 
   useEffect(() => {
     if (!isOpen) {
@@ -128,7 +139,7 @@ export default function CreateCashDisbursementModal({
               className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all cursor-pointer"
             >
               <option value="">Select Revolving Fund...</option>
-              {revolvingFunds.map((fund) => (
+              {eligibleFunds.map((fund) => (
                 <option key={fund.id} value={fund.id}>
                   {getFundLabel ? getFundLabel(fund.id) : fund.name || `Fund #${fund.id}`}
                 </option>
