@@ -94,7 +94,13 @@ const getRevolvingFundById = async (id) => {
  */
 const getDeployedAmountForBudget = async (budgetId) => {
   const rows = await Query(
-    `SELECT COALESCE(SUM(rf_balance + rf_outstanding), 0) AS deployed FROM revolving_fund WHERE rf_budget_id = ?`,
+    `SELECT COALESCE(SUM(
+       CASE
+         WHEN rf_status IN ('CLOSED', 'CLEARED') THEN GREATEST(rf_total_fund - rf_ending, 0)
+         ELSE rf_total_fund
+       END
+     ), 0) AS deployed
+     FROM revolving_fund WHERE rf_budget_id = ?`,
     [budgetId],
   )
   return parseNum(rows[0]?.deployed)

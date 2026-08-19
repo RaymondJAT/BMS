@@ -350,11 +350,18 @@ const getBudgetBudget = async (req, res) => {
         COALESCE(rf.deployed, 0) AS deployed_to_revolving_funds,
         COALESCE(cd.utilized, 0) AS cash_disbursement_utilized
       FROM budget b
-      LEFT JOIN (
-        SELECT rf_budget_id, SUM(rf_balance + rf_outstanding) AS deployed
-        FROM revolving_fund
-        GROUP BY rf_budget_id
-      ) rf ON rf.rf_budget_id = b.b_id
+         LEFT JOIN (
+        SELECT rf_budget_id,
+          SUM(
+            CASE
+              WHEN rf_status IN ('CLOSED', 'CLEARED')
+               THEN GREATEST(rf_total_fund - rf_ending, 0)
+             ELSE rf_total_fund
+            END
+          ) AS deployed
+         FROM revolving_fund
+         GROUP BY rf_budget_id
+       ) rf ON rf.rf_budget_id = b.b_id
       LEFT JOIN (
         SELECT r.rf_budget_id, SUM(c.cd_amount_issued - c.cd_amount_returned) AS utilized
         FROM cash_disbursement c
