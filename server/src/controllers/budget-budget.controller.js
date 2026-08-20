@@ -24,6 +24,17 @@ const wrapRow = (row, model) => {
 const toTxQuery = ({ sql, bindings }) => ({ sql, values: bindings })
 
 /**
+ * Normalizes a raw remarks input into either a trimmed non-empty string or
+ * null. Centralized so "has a remark" checks and "what gets stored" always
+ * agree — a whitespace-only remarks value is treated as no remark at all.
+ */
+const normalizeRemarks = (remarks) => {
+  if (typeof remarks !== 'string') return null
+  const trimmed = remarks.trim()
+  return trimmed === '' ? null : trimmed
+}
+
+/**
  * @name upsertBudgetBudget
  * @description Create a new budget or top-up/update an existing budget.
  *              Automatically records entries into Budget History.
@@ -44,6 +55,13 @@ const toTxQuery = ({ sql, bindings }) => ({ sql, values: bindings })
  *              Allocation is therefore always derivable as
  *              (b_amount - b_beginning_amount), with no separate ledger
  *              needed for it.
+ *
+ *              A Budget History row is written whenever there's something
+ *              worth auditing: either the amount changed (top-up) or a
+ *              remark was supplied (e.g. correcting department/type with
+ *              a note, no dollar change). A bare metadata edit with no
+ *              amount delta and no remark does not get a history row,
+ *              since there'd be nothing to say.
  */
 const upsertBudgetBudget = async (req, res) => {
   // #swagger.tags = ['Budget']
@@ -95,6 +113,7 @@ const upsertBudgetBudget = async (req, res) => {
   // Replace this fallback (and remove the TEMP comment) once auth is in.
   const userId = req.userId || req.user?.id || 1
   const { id, department_id, type, amount, date, remarks } = req.body
+  const normalizedRemarks = normalizeRemarks(remarks)
 
   try {
     // update / top up existing budget
@@ -146,14 +165,20 @@ const upsertBudgetBudget = async (req, res) => {
       // into one real, all-or-nothing transaction.
       const queries = [toTxQuery(updateQuery)]
 
-      if (addedAmount !== 0) {
+      // Log history when there's an actual amount change OR a remark to
+      // record. Previously this was gated on `addedAmount !== 0` alone,
+      // which silently dropped remarks on any top-up call that didn't
+      // also change the amount (e.g. amount omitted/0, remarks-only edit).
+      const shouldLogHistory = addedAmount !== 0 || normalizedRemarks !== null
+
+      if (shouldLogHistory) {
         const historyQuery = SQL.model(Budget.History)
           .insert({
             [Budget.History.cols.budget_id]: id,
             [Budget.History.cols.amount]: addedAmount,
             [Budget.History.cols.previous_amount]: currentAmount,
             [Budget.History.cols.new_amount]: newTotalAmount,
-            [Budget.History.cols.remarks]: remarks || null,
+            [Budget.History.cols.remarks]: normalizedRemarks,
             [Budget.History.cols.department_id]:
               department_id || existingBudget[Budget.Budget.cols.department_id],
             [Budget.History.cols.type]: type || 'CASH',
@@ -203,7 +228,7 @@ const upsertBudgetBudget = async (req, res) => {
           [Budget.History.cols.amount]: initialAmount,
           [Budget.History.cols.previous_amount]: 0,
           [Budget.History.cols.new_amount]: initialAmount,
-          [Budget.History.cols.remarks]: remarks || null,
+          [Budget.History.cols.remarks]: normalizedRemarks,
           [Budget.History.cols.department_id]: department_id,
           [Budget.History.cols.type]: type || 'CASH',
           [Budget.History.cols.date]: date || new Date(),
@@ -320,6 +345,12 @@ const softDeleteBudget = async (req, res) => {
  *                totals.
  *              - cash_disbursement_utilization_percent:
  *                cash_disbursement_utilized / deployed_to_revolving_funds * 100.
+ *
+ *              NOTE: remarks live on budget_history (one row per
+ *              allocation event), not on budget itself, so they're
+ *              intentionally not part of this list response. Use
+ *              getBudgetHistory (optionally filtered by budget_id) to see
+ *              the remark trail for a given budget.
  */
 const getBudgetBudget = async (req, res) => {
   // #swagger.tags = ['Budget']
@@ -338,6 +369,10 @@ const getBudgetBudget = async (req, res) => {
   try {
     const whereClause = includeClosed === 'true' ? '' : `WHERE b.b_status != 'CLOSED'`
 
+    // NOTE: this stays raw SQL (not SQLQueryBuilder) intentionally — it
+    // needs aliased derived-table joins (deployed / utilized subqueries)
+    // which the current builder doesn't support (no join-on-subquery, no
+    // table aliasing). See controller discussion for the trade-off.
     const rows = await Query(`
       SELECT
         b.b_id AS id,
@@ -409,7 +444,8 @@ const getBudgetBudget = async (req, res) => {
  *              Since RF/CD flows no longer write to this table (see
  *              upsertBudgetBudget's docstring), every row here is now
  *              purely a Finance-driven allocation event: the initial
- *              creation entry plus any subsequent top-ups.
+ *              creation entry plus any subsequent top-ups or remarks-only
+ *              edits.
  */
 const getBudgetHistory = async (req, res) => {
   // #swagger.tags = ['Budget']
