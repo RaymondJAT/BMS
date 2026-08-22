@@ -1,27 +1,31 @@
 import React from 'react'
 import { FileCheck2, AlertCircle, CheckCircle2, Calendar, Eye, Edit3, Clock } from 'lucide-react'
 
-/**
- * Helper to extract YYYY-MM-DD (Year, Month, Day) from any date representation.
- */
+// helper date formatter
 function formatDate(dateValue) {
   if (!dateValue || dateValue === '—') return '—'
 
+  let parsed
+
+  // Handle ISO string explicitly or let Date parse string/timestamp
   const str = String(dateValue).trim()
   if (str.includes('T')) {
-    return str.split('T')[0]
+    const [datePart] = str.split('T')
+    const [year, month, day] = datePart.split('-').map(Number)
+    parsed = new Date(year, month - 1, day)
+  } else {
+    parsed = new Date(str)
   }
 
-  const parsed = new Date(str)
   if (isNaN(parsed.getTime())) {
     return str
   }
 
-  const year = parsed.getFullYear()
-  const month = String(parsed.getMonth() + 1).padStart(2, '0')
-  const day = String(parsed.getDate()).padStart(2, '0')
-
-  return `${year}-${month}-${day}`
+  return parsed.toLocaleDateString('en-US', {
+    month: 'short',
+    day: '2-digit',
+    year: 'numeric',
+  })
 }
 
 /**
@@ -258,11 +262,11 @@ export function createRevolvingColumns({
           active: 'bg-emerald-50 text-emerald-700 border-emerald-200',
           open: 'bg-emerald-50 text-emerald-700 border-emerald-200',
           reported: 'bg-blue-50 text-blue-700 border-blue-200',
-          'on review': 'bg-orange-50 text-orange-700 border-orange-200',
-          cleared: 'bg-teal-50 text-teal-700 border-teal-200',
-          clear: 'bg-teal-50 text-teal-700 border-teal-200',
+          'on review': 'bg-amber-50 text-amber-700 border-amber-200',
+          cleared: 'bg-purple-50 text-purple-700 border-purple-200',
+          clear: 'bg-purple-50 text-purple-700 border-purple-200',
           closed: 'bg-slate-100 text-slate-600 border-slate-200',
-          'low balance': 'bg-amber-50 text-amber-700 border-amber-200',
+          'low balance': 'bg-rose-50 text-rose-700 border-rose-200',
         }
 
         return (

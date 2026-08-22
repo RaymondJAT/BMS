@@ -10,6 +10,20 @@ export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, 
       maximumFractionDigits: 2,
     })}`
 
+  // Formats percentages dynamically: shows up to 2 decimal places if needed (e.g. 0.6%, 12.34%), or whole numbers (e.g. 85%)
+  const formatPercent = (val) =>
+    Number(parseFloat(val || 0).toFixed(2)).toLocaleString('en-PH', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    })
+
+  // Helper for dynamic utilization color coding
+  const getBarColor = (pct) => {
+    if (pct >= 85) return 'bg-[#E31837]'
+    if (pct >= 70) return 'bg-amber-500'
+    return 'bg-emerald-500'
+  }
+
   return [
     {
       header: 'Code / Dept',
@@ -32,7 +46,7 @@ export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, 
           <div>
             <p className="font-bold text-slate-900">{departmentName}</p>
             <div className="flex items-center gap-1.5 text-xs text-slate-400 font-mono mt-0.5">
-              <span>{row.id ? row.id.toString().slice(0, 8) : 'N/A'}</span>
+              <span>ID: {row.id ? row.id.toString().slice(0, 8) : 'N/A'}</span>
               <span>•</span>
               <span className="font-sans">{formattedDate}</span>
             </div>
@@ -98,32 +112,37 @@ export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, 
       align: 'right',
       cell: (row) => {
         const deployed = parseFloat(row.deployed_to_revolving_funds || 0)
+        const initialDeployed = parseFloat(row.initial_deployed_funds || 0)
         const utilized = parseFloat(row.cash_disbursement_utilized || 0)
-        const rawPercent = parseFloat(row.cash_disbursement_utilization_percent || 0)
-        const cdUtilPercent = Number.isFinite(rawPercent) ? rawPercent : 0
-        const roundedCd = Math.round(cdUtilPercent)
-        const barWidth = Math.min(Math.max(roundedCd, 0), 100)
+        const totalBudget = parseFloat(row.total_budget || 0)
+
+        // Exact precise percentage calculation
+        const cdUtilPercent = totalBudget > 0 ? (utilized / totalBudget) * 100 : 0
+        const barWidth = Math.min(Math.max(cdUtilPercent, 0), 100)
 
         return (
           <div className="space-y-1">
             <div className="font-semibold text-slate-800">{formatCurrency(deployed)}</div>
-            {deployed > 0 && (
-              <div className="w-32 ml-auto space-y-0.5 text-right">
+
+            {/* Baseline initial deployed capital */}
+            {initialDeployed > 0 && (
+              <div className="text-[10px] text-slate-400">
+                Initial Baseline: {formatCurrency(initialDeployed)}
+              </div>
+            )}
+
+            {/* Cash Disbursement Utilization Progress */}
+            {utilized > 0 && (
+              <div className="w-32 ml-auto space-y-0.5 text-right mt-1">
                 <div className="flex justify-between text-[10px] text-slate-500 font-medium">
                   <span>Disbursed:</span>
                   <span>
-                    {formatCurrency(utilized)} ({roundedCd}%)
+                    {formatCurrency(utilized)} ({formatPercent(cdUtilPercent)}%)
                   </span>
                 </div>
                 <div className="w-full bg-slate-100 rounded-full h-1 overflow-hidden">
                   <div
-                    className={`h-full rounded-full transition-all ${
-                      cdUtilPercent > 100
-                        ? 'bg-[#E31837]'
-                        : cdUtilPercent > 85
-                          ? 'bg-amber-500'
-                          : 'bg-indigo-500'
-                    }`}
+                    className={`h-full rounded-full transition-all ${getBarColor(cdUtilPercent)}`}
                     style={{ width: `${barWidth}%` }}
                   />
                 </div>
@@ -157,20 +176,16 @@ export function createBudgetColumns({ getDepartmentName, onViewHistory, onEdit, 
       cell: (row) => {
         const rawPercent = parseFloat(row.utilization_percent || 0)
         const percentage = Number.isFinite(rawPercent) ? rawPercent : 0
-        const rounded = Math.round(percentage)
-        const barWidth = Math.min(Math.max(rounded, 0), 100)
-        const isOver = percentage > 100
+        const barWidth = Math.min(Math.max(percentage, 0), 100)
 
         return (
           <div className="w-28 mx-auto space-y-1">
             <div className="flex justify-between text-xs font-semibold text-slate-600">
-              <span>{rounded}%</span>
+              <span>{formatPercent(percentage)}%</span>
             </div>
             <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all ${
-                  isOver ? 'bg-[#E31837]' : rounded > 85 ? 'bg-amber-500' : 'bg-emerald-500'
-                }`}
+                className={`h-full rounded-full transition-all ${getBarColor(percentage)}`}
                 style={{ width: `${barWidth}%` }}
               />
             </div>

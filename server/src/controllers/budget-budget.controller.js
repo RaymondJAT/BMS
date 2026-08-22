@@ -330,6 +330,8 @@ const softDeleteBudget = async (req, res) => {
  *                disbursement is returned; naturally grows on top-up or
  *                issue. This is what actually gates new Revolving Fund
  *                creation/top-up (see revolvingFundController.js).
+ *              - initial_deployed_funds: SUM(rf_total_fund) baseline capital
+ *                originally created for revolving funds prior to closures.
  *              - remaining_budget: total_budget - deployed_to_revolving_funds.
  *              - utilization_percent: deployed_to_revolving_funds /
  *                total_budget * 100.
@@ -383,20 +385,22 @@ const getBudgetBudget = async (req, res) => {
         b.b_status AS status,
         b.b_createdAt AS createdAt,
         COALESCE(rf.deployed, 0) AS deployed_to_revolving_funds,
+        COALESCE(rf.initial_deployed, 0) AS initial_deployed_funds,
         COALESCE(cd.utilized, 0) AS cash_disbursement_utilized
       FROM budget b
-         LEFT JOIN (
+      LEFT JOIN (
         SELECT rf_budget_id,
+          SUM(rf_total_fund) AS initial_deployed,
           SUM(
             CASE
               WHEN rf_status IN ('CLOSED', 'CLEARED')
-               THEN GREATEST(rf_total_fund - rf_ending, 0)
-             ELSE rf_total_fund
+                THEN GREATEST(rf_total_fund - rf_ending, 0)
+              ELSE rf_total_fund
             END
           ) AS deployed
-         FROM revolving_fund
-         GROUP BY rf_budget_id
-       ) rf ON rf.rf_budget_id = b.b_id
+        FROM revolving_fund
+        GROUP BY rf_budget_id
+      ) rf ON rf.rf_budget_id = b.b_id
       LEFT JOIN (
         SELECT r.rf_budget_id, SUM(c.cd_amount_issued - c.cd_amount_returned) AS utilized
         FROM cash_disbursement c
@@ -411,6 +415,7 @@ const getBudgetBudget = async (req, res) => {
       const beginningAmount = Math.round(parseFloat(row.beginning_amount || 0) * 100) / 100
       const additionalAllocation = Math.round((amount - beginningAmount) * 100) / 100
       const deployed = Math.round(parseFloat(row.deployed_to_revolving_funds || 0) * 100) / 100
+      const initialDeployed = Math.round(parseFloat(row.initial_deployed_funds || 0) * 100) / 100
       const utilized = Math.round(parseFloat(row.cash_disbursement_utilized || 0) * 100) / 100
       const remaining = Math.round((amount - deployed) * 100) / 100
       const utilizationPercent = amount > 0 ? Math.round((deployed / amount) * 10000) / 100 : 0
@@ -424,6 +429,7 @@ const getBudgetBudget = async (req, res) => {
         additional_allocation: additionalAllocation,
         total_budget: amount,
         deployed_to_revolving_funds: deployed,
+        initial_deployed_funds: initialDeployed,
         remaining_budget: remaining,
         utilization_percent: utilizationPercent,
         cash_disbursement_utilized: utilized,
