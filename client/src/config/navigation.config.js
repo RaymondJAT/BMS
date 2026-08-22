@@ -101,7 +101,7 @@ export const NAVIGATION_ITEMS = [
     icon: Wallet,
     children: [
       // Access: Requester, Team Leader, Custodian, Finance, Admin
-      { id: 'wb-cash-requests', title: 'Cash Requests', to: '/workbench/cash-requests' },
+      { id: 'wb-cash-requests', title: 'Cash Requests', to: '/workbench/request' },
 
       // Access: Requester, Team Leader, Custodian, Finance, Admin
       { id: 'wb-liquidations', title: 'Liquidations', to: '/workbench/liquidations' },
