@@ -46,6 +46,10 @@ function CashRequestPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('ALL')
 
+  // Row Selection State
+  const [selectedIds, setSelectedIds] = useState([])
+  const [selectedRowObjects, setSelectedRowObjects] = useState([])
+
   // Fetch Budget context for resolving department / fund labels
   const { budgets = [], getDepartmentName, isLoading: isBudgetsLoading } = useBudgets()
 
@@ -91,6 +95,12 @@ function CashRequestPage() {
     },
     [budgets, getDepartmentName],
   )
+
+  // Selection Handler
+  const handleSelectionChange = useCallback((keys, selectedObjects) => {
+    setSelectedIds(keys)
+    setSelectedRowObjects(selectedObjects)
+  }, [])
 
   // Action Handlers
   const handleView = useCallback((row) => {
@@ -317,6 +327,9 @@ function CashRequestPage() {
             columns={columns}
             data={filteredRequests}
             keyExtractor={(row) => row.id || row.cash_voucher}
+            selectable={true}
+            selectedRows={selectedIds}
+            onSelectionChange={handleSelectionChange}
             maxHeight="h-full"
             containerClassName="h-full flex flex-col min-h-0"
             emptyMessage={
@@ -326,7 +339,10 @@ function CashRequestPage() {
             }
             footer={
               <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
-                <span>Showing {filteredRequests.length} entries</span>
+                <span>
+                  Showing {filteredRequests.length} entries
+                  {selectedIds.length > 0 && ` (${selectedIds.length} selected)`}
+                </span>
                 <span>Fiscal Year 2026</span>
               </div>
             }

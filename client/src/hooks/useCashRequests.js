@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useMemo } from 'react'
 import departmentApi from '../api/departmentApi'
 
-// Mock Data Source (aligned strictly with the 4 core status types)
+// Mock Data Source (aligned strictly with the 4 core status types and added project names)
 const MOCK_CASH_REQUESTS = [
   {
     id: 'CR-1001',
@@ -10,6 +10,7 @@ const MOCK_CASH_REQUESTS = [
     requester_name: 'John Doe',
     department_id: 1,
     department_name: 'Engineering',
+    project_name: 'Metro Expansion - Phase 1',
     purpose: 'Site visit transportation and meals',
     amount_requested: 3500.0,
     status: 'PENDING',
@@ -21,6 +22,7 @@ const MOCK_CASH_REQUESTS = [
     requester_name: 'Jane Smith',
     department_id: 2,
     department_name: 'Marketing',
+    project_name: 'Q3 Brand Campaign',
     purpose: 'Print advertising flyers (Urgent)',
     amount_requested: 7200.0,
     status: 'PENDING',
@@ -32,6 +34,7 @@ const MOCK_CASH_REQUESTS = [
     requester_name: 'Mark Reyes',
     department_id: 3,
     department_name: 'Operations',
+    project_name: 'HQ Infrastructure Upgrade',
     purpose: 'Emergency office hardware maintenance',
     amount_requested: 5000.0,
     status: 'APPROVED',
@@ -43,6 +46,7 @@ const MOCK_CASH_REQUESTS = [
     requester_name: 'Sarah Connor',
     department_id: 4,
     department_name: 'Human Resources',
+    project_name: 'Annual Employee Engagement',
     purpose: 'Team building refreshment items',
     amount_requested: 12500.0,
     status: 'COMPLETED',
@@ -54,6 +58,7 @@ const MOCK_CASH_REQUESTS = [
     requester_name: 'Alex Mercer',
     department_id: 5,
     department_name: 'Logistics',
+    project_name: 'Fleet Optimization',
     purpose: 'Fuel allowance for emergency delivery vehicle',
     amount_requested: 2400.0,
     status: 'REJECTED',
@@ -65,6 +70,7 @@ const MOCK_CASH_REQUESTS = [
     requester_name: 'Maria Clara',
     department_id: 6,
     department_name: 'Finance',
+    project_name: 'Internal Compliance Audit',
     purpose: 'Notary fees for legal compliance docs',
     amount_requested: 1500.0,
     status: 'COMPLETED',
@@ -110,7 +116,7 @@ function useCashRequests(filters = {}) {
     [departments],
   )
 
-  // Map and normalize statuses to guarantee strict alignment with standard categories
+  // Map and normalize statuses and project info
   const requests = useMemo(() => {
     if (!Array.isArray(rawRequests)) return []
     return rawRequests.map((item) => {
@@ -127,6 +133,7 @@ function useCashRequests(filters = {}) {
         ...item,
         status: normalizedStatus,
         department_name: getDepartmentName(item),
+        project_name: item.project_name || item.project || 'General / Internal',
       }
     })
   }, [rawRequests, getDepartmentName])

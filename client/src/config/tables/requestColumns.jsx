@@ -1,5 +1,5 @@
 import React from 'react'
-import { CheckSquare, Banknote, FileDown, User, Building, Calendar } from 'lucide-react'
+import { FileDown, User, Building, Calendar, Folder } from 'lucide-react'
 
 const formatCurrency = (val) =>
   `₱${parseFloat(val || 0).toLocaleString('en-PH', {
@@ -19,20 +19,7 @@ const formatDate = (val) => {
     : 'N/A'
 }
 
-export function createRequestColumns({
-  userRole,
-  onApprove,
-  onDisburse,
-  onDownloadPdf,
-  selectedIds = [],
-  onSelectRow,
-  onSelectAll,
-  isAllSelected = false,
-  getEmployeeName,
-  getDepartmentName,
-}) {
-  const role = String(userRole || '').toUpperCase()
-
+export function createRequestColumns({ onDownloadPdf, getEmployeeName, getDepartmentName }) {
   const resolveEmployee = (row) => {
     if (typeof getEmployeeName === 'function') {
       const resolved = getEmployeeName(row.requester_name || row.employee_id || row.created_by)
@@ -50,35 +37,6 @@ export function createRequestColumns({
   }
 
   return [
-    {
-      id: 'select',
-      header: () => (
-        <input
-          type="checkbox"
-          checked={isAllSelected}
-          onChange={(e) => onSelectAll?.(e.target.checked)}
-          className="rounded border-slate-300 text-[#E31837] focus:ring-[#E31837] cursor-pointer"
-        />
-      ),
-      width: 'w-10',
-      align: 'center',
-      cell: (row) => {
-        const rowId = row.id || row.cash_voucher
-        const isChecked = selectedIds.includes(rowId)
-
-        return (
-          <input
-            type="checkbox"
-            checked={isChecked}
-            onChange={(e) => {
-              e.stopPropagation()
-              onSelectRow?.(rowId, e.target.checked)
-            }}
-            className="rounded border-slate-300 text-[#E31837] focus:ring-[#E31837] cursor-pointer"
-          />
-        )
-      },
-    },
     {
       header: 'ID & Voucher',
       accessorKey: 'cash_voucher',
@@ -110,7 +68,7 @@ export function createRequestColumns({
       },
     },
     {
-      header: 'Requester & Department',
+      header: 'Requester & Context',
       accessorKey: 'requester_name',
       sortable: true,
       cell: (row) => (
@@ -122,6 +80,15 @@ export function createRequestColumns({
           <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
             <Building className="w-3 h-3 text-slate-400 shrink-0" />
             <span>{resolveDepartment(row)}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 font-medium">
+            <Folder className="w-3 h-3 text-slate-400 shrink-0" />
+            <span
+              className="truncate max-w-35"
+              title={row.project_name || row.project || 'General / Internal'}
+            >
+              {row.project_name || row.project || 'General / Internal'}
+            </span>
           </div>
         </div>
       ),
@@ -200,62 +167,21 @@ export function createRequestColumns({
     {
       header: 'Actions',
       align: 'center',
-      width: 'w-24',
-      cell: (row) => {
-        const rawStatus = String(row.status || '').toUpperCase()
-
-        const canApprove =
-          (rawStatus.includes('PENDING') || rawStatus === 'PENDING') &&
-          ['TEAM LEADER', 'FUND CUSTODIAN', 'ADMINISTRATOR', 'ADMIN'].includes(role)
-
-        const canDisburse =
-          rawStatus === 'APPROVED' &&
-          ['FUND CUSTODIAN', 'FINANCE', 'ADMINISTRATOR', 'ADMIN'].includes(role)
-
-        return (
-          <div className="flex items-center justify-center gap-1">
-            {canApprove && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onApprove?.(row)
-                }}
-                title="Review / Approve"
-                className="p-1.5 text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
-              >
-                <CheckSquare className="w-4 h-4" />
-              </button>
-            )}
-
-            {canDisburse && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onDisburse?.(row)
-                }}
-                title="Disburse / Complete"
-                className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-              >
-                <Banknote className="w-4 h-4" />
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onDownloadPdf?.(row)
-              }}
-              title="Download PDF"
-              className="p-1.5 text-slate-500 hover:text-[#E31837] hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-            >
-              <FileDown className="w-4 h-4" />
-            </button>
-          </div>
-        )
-      },
+      cell: (row) => (
+        <div className="flex items-center justify-center">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDownloadPdf?.(row)
+            }}
+            title="Download PDF"
+            className="p-1.5 text-slate-500 hover:text-[#E31837] hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+          >
+            <FileDown className="w-4 h-4" />
+          </button>
+        </div>
+      ),
     },
   ]
 }
