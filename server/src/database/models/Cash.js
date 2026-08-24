@@ -3,8 +3,27 @@
  */
 
 /**
+ * @typedef {Object} RequestCols
+ * @property {'cr_id'} id
+ * @property {'cr_reference_id'} reference_id
+ * @property {'cr_cv_number'} cv_number
+ * @property {'cr_purpose'} purpose
+ * @property {'cr_project'} project
+ * @property {'cr_amount'} amount
+ * @property {'cr_revolving_fund_id'} revolving_fund_id
+ * @property {'cr_employee_id'} employee_id
+ * @property {'cr_department_id'} department_id
+ * @property {'cr_team_lead'} team_lead
+ * @property {'cr_request_date'} request_date
+ * @property {'cr_status'} status
+ * @property {'cr_createdAt'} createdAt
+ * @property {'cr_updated_at'} updated_at
+ */
+
+/**
  * @typedef {Object} DisbursementCols
  * @property {'cd_id'} id
+ * @property {'cd_cash_request_id'} cash_request_id
  * @property {'cd_date_issued'} date_issued
  * @property {'cd_received_by'} received_by
  * @property {'cd_revolving_fund_id'} revolving_fund_id
@@ -38,22 +57,6 @@
  */
 
 /**
- * @typedef {Object} RequestCols
- * @property {'cr_id'} id
- * @property {'cr_reference_id'} reference_id
- * @property {'cr_cv_number'} cv_number
- * @property {'cr_purpose'} purpose
- * @property {'cr_project'} project
- * @property {'cr_employee_id'} employee_id
- * @property {'cr_department_id'} department_id
- * @property {'cr_team_lead'} team_lead
- * @property {'cr_request_date'} request_date
- * @property {'cr_status'} status
- * @property {'cr_createdAt'} createdAt
- * @property {'cr_updated_at'} updated_at
- */
-
-/**
  * @typedef {Object} RequestActivityCols
  * @property {'cra_id'} id
  * @property {'cra_user_id'} user_id
@@ -65,6 +68,30 @@
  */
 
 const Cash = {
+  Request: {
+    table: 'cash_request',
+    pk: 'cr_id',
+    prefix: 'cr',
+    /** @type {RequestCols} */
+    cols: {
+      id: 'cr_id',
+      reference_id: 'cr_reference_id',
+      cv_number: 'cr_cv_number',
+      purpose: 'cr_purpose',
+      project: 'cr_project',
+      amount: 'cr_amount',
+      revolving_fund_id: 'cr_revolving_fund_id',
+      employee_id: 'cr_employee_id',
+      department_id: 'cr_department_id',
+      team_lead: 'cr_team_lead',
+      request_date: 'cr_request_date',
+      status: 'cr_status',
+      createdAt: 'cr_createdAt',
+      updated_at: 'cr_updated_at',
+    },
+    select: ['cr_id', 'cr_reference_id', 'cr_cv_number', 'cr_purpose', 'cr_project', 'cr_amount', 'cr_revolving_fund_id', 'cr_employee_id', 'cr_department_id', 'cr_team_lead', 'cr_request_date', 'cr_status', 'cr_createdAt', 'cr_updated_at'],
+    insert: ['cr_reference_id', 'cr_cv_number', 'cr_purpose', 'cr_project', 'cr_amount', 'cr_revolving_fund_id', 'cr_employee_id', 'cr_department_id', 'cr_team_lead', 'cr_status'],
+  },
   Disbursement: {
     table: 'cash_disbursement',
     pk: 'cd_id',
@@ -72,6 +99,7 @@ const Cash = {
     /** @type {DisbursementCols} */
     cols: {
       id: 'cd_id',
+      cash_request_id: 'cd_cash_request_id',
       date_issued: 'cd_date_issued',
       received_by: 'cd_received_by',
       revolving_fund_id: 'cd_revolving_fund_id',
@@ -85,8 +113,8 @@ const Cash = {
       status: 'cd_status',
       createdAt: 'cd_createdAt',
     },
-    select: ['cd_id', 'cd_date_issued', 'cd_received_by', 'cd_revolving_fund_id', 'cd_department_id', 'cd_particulars', 'cd_amount_issued', 'cd_cash_voucher', 'cd_amount_returned', 'cd_outstanding_amount', 'cd_amount_expended', 'cd_status', 'cd_createdAt'],
-    insert: ['cd_received_by', 'cd_revolving_fund_id', 'cd_department_id', 'cd_particulars', 'cd_amount_issued', 'cd_cash_voucher', 'cd_amount_returned', 'cd_outstanding_amount', 'cd_amount_expended', 'cd_status'],
+    select: ['cd_id', 'cd_cash_request_id', 'cd_date_issued', 'cd_received_by', 'cd_revolving_fund_id', 'cd_department_id', 'cd_particulars', 'cd_amount_issued', 'cd_cash_voucher', 'cd_amount_returned', 'cd_outstanding_amount', 'cd_amount_expended', 'cd_status', 'cd_createdAt'],
+    insert: ['cd_cash_request_id', 'cd_received_by', 'cd_revolving_fund_id', 'cd_department_id', 'cd_particulars', 'cd_amount_issued', 'cd_cash_voucher', 'cd_amount_returned', 'cd_outstanding_amount', 'cd_amount_expended', 'cd_status'],
   },
   DisbursementFile: {
     table: 'cash_disbursement_file',
@@ -117,28 +145,6 @@ const Cash = {
     },
     select: ['cda_id', 'cda_cash_disbursement_id', 'cda_amount', 'cda_remarks', 'cda_particulars', 'cda_createdAt'],
     insert: ['cda_cash_disbursement_id', 'cda_amount', 'cda_remarks', 'cda_particulars'],
-  },
-  Request: {
-    table: 'cash_request',
-    pk: 'cr_id',
-    prefix: 'cr',
-    /** @type {RequestCols} */
-    cols: {
-      id: 'cr_id',
-      reference_id: 'cr_reference_id',
-      cv_number: 'cr_cv_number',
-      purpose: 'cr_purpose',
-      project: 'cr_project',
-      employee_id: 'cr_employee_id',
-      department_id: 'cr_department_id',
-      team_lead: 'cr_team_lead',
-      request_date: 'cr_request_date',
-      status: 'cr_status',
-      createdAt: 'cr_createdAt',
-      updated_at: 'cr_updated_at',
-    },
-    select: ['cr_id', 'cr_reference_id', 'cr_cv_number', 'cr_purpose', 'cr_project', 'cr_employee_id', 'cr_department_id', 'cr_team_lead', 'cr_request_date', 'cr_status', 'cr_createdAt', 'cr_updated_at'],
-    insert: ['cr_reference_id', 'cr_cv_number', 'cr_purpose', 'cr_project', 'cr_employee_id', 'cr_department_id', 'cr_team_lead', 'cr_status'],
   },
   RequestActivity: {
     table: 'cash_request_activity',

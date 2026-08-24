@@ -1,17 +1,22 @@
 const express = require('express')
 const {
   getCashRequest,
-  upsertCashRequest,
+  createCashRequest,
+  approveCashRequest,
+  rejectCashRequest,
+  completeCashRequest,
   getCashRequestActivity,
-  upsertCashRequestActivity,
 } = require('../controllers/cash-request.controller')
 
 const cashRequestRouter = express.Router()
 
 cashRequestRouter.get('/', getCashRequest)
-cashRequestRouter.post('/', upsertCashRequest)
 cashRequestRouter.get('/activity', getCashRequestActivity)
-cashRequestRouter.post('/activity', upsertCashRequestActivity)
+
+cashRequestRouter.post('/', createCashRequest)
+cashRequestRouter.put('/approve', approveCashRequest)
+cashRequestRouter.put('/reject', rejectCashRequest)
+cashRequestRouter.put('/complete', completeCashRequest)
 
 module.exports = {
   cashRequestRouter,

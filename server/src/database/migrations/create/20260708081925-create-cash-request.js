@@ -1,6 +1,6 @@
 'use strict'
 
-/** @type {import('sequelize-cli').Migration} */
+/**  @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
     await queryInterface.createTable('cash_request', {
@@ -25,6 +25,20 @@ module.exports = {
       },
       cr_project: {
         type: Sequelize.STRING(300),
+        allowNull: false,
+      },
+      cr_amount: {
+        type: Sequelize.DECIMAL(12, 2),
+        allowNull: false,
+      },
+      cr_revolving_fund_id: {
+        type: Sequelize.INTEGER,
+        references: {
+          model: 'revolving_fund',
+          key: 'rf_id',
+        },
+        onUpdate: 'CASCADE',
+        onDelete: 'RESTRICT',
         allowNull: false,
       },
       cr_employee_id: {

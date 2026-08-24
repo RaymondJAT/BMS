@@ -11,6 +11,16 @@ module.exports = {
         autoIncrement: true,
         unique: true,
       },
+      cd_cash_request_id: {
+        type: Sequelize.INTEGER,
+        references: {
+          model: 'cash_request',
+          key: 'cr_id',
+        },
+        onUpdate: 'CASCADE',
+        onDelete: 'RESTRICT',
+        allowNull: true,
+      },
       cd_date_issued: {
         type: Sequelize.DATE,
         allowNull: false,
