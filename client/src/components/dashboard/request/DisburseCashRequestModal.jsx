@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Modal } from '../../ui/Modal'
+import { amountToWords } from '../../../utils/numberToWords'
 
 const ELIGIBLE_FUND_STATUSES = ['OPEN', 'ON REVIEW']
 
@@ -56,6 +57,10 @@ export default function DisburseCashRequestModal({
       setFormError(null)
     }
   }, [isOpen])
+
+  const amountInWords = useMemo(() => {
+    return request?.amount ? amountToWords(request.amount) : ''
+  }, [request?.amount])
 
   const eligibleFunds = useMemo(
     () =>
@@ -175,6 +180,21 @@ export default function DisburseCashRequestModal({
             </div>
             <div className="font-bold text-slate-900">{formatCurrency(request.amount)}</div>
           </div>
+        </div>
+
+        {/* Amount in Words Field */}
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+            Amount in Words
+          </label>
+          <input
+            type="text"
+            readOnly
+            tabIndex={-1}
+            value={amountInWords}
+            placeholder="N/A"
+            className="w-full px-2.5 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 italic cursor-not-allowed select-none focus:outline-none"
+          />
         </div>
 
         {/* REVOLVING FUND & BALANCE — selected here, not by the Requester */}

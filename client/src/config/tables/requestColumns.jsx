@@ -54,12 +54,16 @@ export function createRequestColumns({
   getDepartmentName,
   getFundLabel,
 }) {
-  const canApprove = ['TEAM_LEAD', 'ADMIN', 'ADMINISTRATOR'].includes(userRole)
-  const canComplete = ['FUND_CUSTODIAN', 'ADMIN', 'ADMINISTRATOR'].includes(userRole)
-  // ADMINISTRATOR is a placeholder role (see request.jsx) that also
-  // stands in for "Requester" until real auth/roles land, so it can edit
-  // its own rows too.
-  const canActAsRequester = ['REQUESTER', 'ADMINISTRATOR'].includes(userRole)
+  // DEV MODE: no role wired up yet, or explicitly Administrator, means
+  // "can see and do everything" — this is intentional while access
+  // control isn't built out, so every action is visible/testable without
+  // needing real auth first. Once real roles land, remove this fallback
+  // and rely purely on the specific role checks below.
+  const hasFullAccess = !userRole || userRole === 'ADMINISTRATOR'
+
+  const canApprove = hasFullAccess || ['TEAM_LEAD', 'ADMIN'].includes(userRole)
+  const canComplete = hasFullAccess || ['FUND_CUSTODIAN', 'ADMIN'].includes(userRole)
+  const canActAsRequester = hasFullAccess || userRole === 'REQUESTER'
 
   const resolveEmployee = (row) => {
     if (typeof getEmployeeName === 'function') {
@@ -196,8 +200,13 @@ export function createRequestColumns({
       align: 'center',
       cell: (row) => {
         const status = String(row.status || '').toUpperCase()
+
+        // Under full access (no role yet, or Administrator), ownership
+        // doesn't gate anything — you can edit any row to test the flow.
+        // With a real REQUESTER role, it's still locked to rows you own.
         const ownsRequest =
-          canActAsRequester && String(row.employee_id) === String(currentEmployeeId)
+          hasFullAccess ||
+          (canActAsRequester && String(row.employee_id) === String(currentEmployeeId))
         const canEdit = ownsRequest && EDITABLE_STATUSES.includes(status)
 
         return (

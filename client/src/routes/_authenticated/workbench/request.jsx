@@ -38,11 +38,12 @@ const formatCurrency = (val) =>
 
 function CashRequestPage() {
   // TODO: replace with the real authenticated user's role + employee id
-  // once auth is wired up. 'ADMINISTRATOR' satisfies the Requester,
-  // Approve, and Complete gates in requestColumns.js so every stage of
-  // the workflow is visible/testable before RBAC lands. currentEmployeeId
-  // is what requestColumns.js uses to decide row ownership for Edit —
-  // wire it to the real logged-in employee id once available.
+  // once auth is wired up. Leaving userRole as 'ADMINISTRATOR' (or unset)
+  // gives full access in requestColumns.js — see hasFullAccess there —
+  // so every action, including Edit on requests you don't "own", is
+  // visible for testing before RBAC exists. currentEmployeeId is unused
+  // under full access; wire it to the real logged-in employee id once
+  // ownership actually needs to be enforced.
   const userRole = 'ADMINISTRATOR'
   const currentEmployeeId = null
 

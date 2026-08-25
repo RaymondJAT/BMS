@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react'
-import { ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, Check, Minus } from 'lucide-react'
 
-// Helper component for the header checkbox to handle indeterminate DOM state
+// Custom Header Checkbox rendering a red/maroon check or dash icon
 const HeaderCheckbox = ({ checked, indeterminate, onChange }) => {
   const checkboxRef = useRef(null)
 
@@ -12,13 +12,34 @@ const HeaderCheckbox = ({ checked, indeterminate, onChange }) => {
   }, [indeterminate])
 
   return (
-    <input
-      type="checkbox"
-      ref={checkboxRef}
-      checked={checked}
-      onChange={onChange}
-      className="rounded border-slate-300 text-[#E31837] focus:ring-[#E31837] cursor-pointer"
-    />
+    <label className="relative inline-flex items-center justify-center cursor-pointer p-0.5">
+      <input
+        type="checkbox"
+        ref={checkboxRef}
+        checked={checked}
+        onChange={onChange}
+        className="sr-only peer"
+      />
+      <div className="w-4 h-4 rounded border border-slate-300 bg-white peer-checked:bg-rose-50 peer-checked:border-red-600 peer-focus:ring-2 peer-focus:ring-red-500/20 transition-all flex items-center justify-center shadow-2xs">
+        {checked && <Check className="w-3 h-3 text-[#E31837] stroke-3" />}
+        {!checked && indeterminate && <Minus className="w-3 h-3 text-[#E31837] stroke-3" />}
+      </div>
+    </label>
+  )
+}
+
+// Custom Row Checkbox
+const RowCheckbox = ({ checked, onChange }) => {
+  return (
+    <label
+      className="relative inline-flex items-center justify-center cursor-pointer p-0.5"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <input type="checkbox" checked={checked} onChange={onChange} className="sr-only peer" />
+      <div className="w-4 h-4 rounded border border-slate-300 bg-white peer-checked:bg-rose-50 peer-checked:border-red-600 peer-focus:ring-2 peer-focus:ring-red-500/20 transition-all flex items-center justify-center shadow-2xs">
+        {checked && <Check className="w-3 h-3 text-[#E31837] stroke-3" />}
+      </div>
+    </label>
   )
 }
 
@@ -139,14 +160,7 @@ const DataTable = ({
       ),
       cell: (row, rowKey) => {
         const isChecked = selectedRows.includes(rowKey)
-        return (
-          <input
-            type="checkbox"
-            checked={isChecked}
-            onChange={(e) => handleSelectRow(e, row, rowKey)}
-            className="rounded border-slate-300 text-[#E31837] focus:ring-[#E31837] cursor-pointer"
-          />
-        )
+        return <RowCheckbox checked={isChecked} onChange={(e) => handleSelectRow(e, row, rowKey)} />
       },
     }
 
@@ -230,7 +244,7 @@ const DataTable = ({
                     key={rowKey}
                     onClick={() => onRowClick && onRowClick(row)}
                     className={`transition-colors hover:bg-slate-50/80 ${
-                      isSelected ? 'bg-rose-50/30' : ''
+                      isSelected ? 'bg-rose-50/40' : ''
                     } ${onRowClick ? 'cursor-pointer' : ''}`}
                   >
                     {displayColumns.map((col, cIdx) => {

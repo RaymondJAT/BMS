@@ -24,10 +24,10 @@ export default function StatCard({
   variant = 'red',
   loading = false,
 }) {
-  // Variant theme mapping
+  // Variant theme mapping - Red variant elevated to a soft maroon accent
   const variants = {
     red: {
-      badge: 'bg-red-50 text-[#E31837] border-red-100/80',
+      badge: 'bg-rose-50 text-rose-900 border-rose-200/80',
     },
     blue: {
       badge: 'bg-blue-50 text-blue-600 border-blue-100/80',
@@ -65,7 +65,7 @@ export default function StatCard({
     <motion.div
       whileHover={{ y: -1.5 }}
       transition={{ duration: 0.15, ease: 'easeOut' }}
-      className="group relative flex flex-col justify-between overflow-hidden rounded-xl border border-slate-200/80 bg-white p-3 shadow-2xs hover:shadow-xs hover:border-slate-300 transition-all duration-200"
+      className="group relative flex flex-col justify-between overflow-hidden rounded-xl border border-slate-200/80 bg-white p-3 shadow-2xs hover:shadow-xs hover:border-rose-900/20 transition-all duration-200"
     >
       {/* Top Row: Title & Icon Badge */}
       <div className="flex items-center justify-between gap-1.5">
@@ -97,7 +97,7 @@ export default function StatCard({
                   trendDirection === 'up'
                     ? 'bg-emerald-50 text-emerald-700 border border-emerald-200/60'
                     : trendDirection === 'down'
-                      ? 'bg-red-50 text-red-700 border border-red-200/60'
+                      ? 'bg-rose-50 text-rose-900 border border-rose-200/60'
                       : 'bg-slate-100 text-slate-600 border border-slate-200/60'
                 }`}
               >

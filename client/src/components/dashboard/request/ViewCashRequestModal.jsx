@@ -1,4 +1,6 @@
+import { useMemo } from 'react'
 import { Modal } from '../../ui/Modal'
+import { amountToWords } from '../../../utils/numberToWords'
 
 const formatCurrency = (val) =>
   `₱${parseFloat(val || 0).toLocaleString('en-PH', {
@@ -25,6 +27,10 @@ export default function ViewCashRequestModal({
   getDepartmentName,
   getFundLabel,
 }) {
+  const amountInWords = useMemo(() => {
+    return request?.amount ? amountToWords(request.amount) : ''
+  }, [request?.amount])
+
   if (!request) return null
 
   const status = String(request.status || '').toUpperCase()
@@ -81,6 +87,21 @@ export default function ViewCashRequestModal({
               <div className="font-semibold text-slate-800 wrap-break-word">{value}</div>
             </div>
           ))}
+        </div>
+
+        {/* Amount in Words Field */}
+        <div>
+          <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
+            Amount in Words
+          </label>
+          <input
+            type="text"
+            readOnly
+            tabIndex={-1}
+            value={amountInWords}
+            placeholder="N/A"
+            className="w-full px-2.5 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 italic cursor-not-allowed select-none focus:outline-none"
+          />
         </div>
 
         <div className="flex items-center justify-end pt-2.5 border-t border-slate-100">

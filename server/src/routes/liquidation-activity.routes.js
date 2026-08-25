@@ -1,5 +1,8 @@
 const express = require('express')
-const { getLiquidationActivity, upsertLiquidationActivity } = require('../controllers/liquidation-activity.controller')
+const {
+  getLiquidationActivity,
+  upsertLiquidationActivity,
+} = require('../controllers/liquidation-activity.controller')
 
 const liquidationActivityRouter = express.Router()
 
