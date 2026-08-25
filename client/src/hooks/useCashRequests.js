@@ -1,212 +1,161 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useMemo } from 'react'
-import departmentApi from '../api/departmentApi'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { cashRequestApi } from '../api/cashRequestApi'
 
-// Mock Data Source (aligned strictly with the 4 core status types and added project names)
-const MOCK_CASH_REQUESTS = [
-  {
-    id: 'CR-1001',
-    cash_voucher: 'CV-2026-001',
-    requester_name: 'John Doe',
-    department_id: 1,
-    department_name: 'Engineering',
-    project_name: 'Metro Expansion - Phase 1',
-    purpose: 'Site visit transportation and meals',
-    amount_requested: 3500.0,
-    status: 'PENDING',
-    created_at: '2026-08-20',
-  },
-  {
-    id: 'CR-1002',
-    cash_voucher: 'CV-2026-002',
-    requester_name: 'Jane Smith',
-    department_id: 2,
-    department_name: 'Marketing',
-    project_name: 'Q3 Brand Campaign',
-    purpose: 'Print advertising flyers (Urgent)',
-    amount_requested: 7200.0,
-    status: 'PENDING',
-    created_at: '2026-08-21',
-  },
-  {
-    id: 'CR-1003',
-    cash_voucher: 'CV-2026-003',
-    requester_name: 'Mark Reyes',
-    department_id: 3,
-    department_name: 'Operations',
-    project_name: 'HQ Infrastructure Upgrade',
-    purpose: 'Emergency office hardware maintenance',
-    amount_requested: 5000.0,
-    status: 'APPROVED',
-    created_at: '2026-08-19',
-  },
-  {
-    id: 'CR-1004',
-    cash_voucher: 'CV-2026-004',
-    requester_name: 'Sarah Connor',
-    department_id: 4,
-    department_name: 'Human Resources',
-    project_name: 'Annual Employee Engagement',
-    purpose: 'Team building refreshment items',
-    amount_requested: 12500.0,
-    status: 'COMPLETED',
-    created_at: '2026-08-18',
-  },
-  {
-    id: 'CR-1005',
-    cash_voucher: 'CV-2026-005',
-    requester_name: 'Alex Mercer',
-    department_id: 5,
-    department_name: 'Logistics',
-    project_name: 'Fleet Optimization',
-    purpose: 'Fuel allowance for emergency delivery vehicle',
-    amount_requested: 2400.0,
-    status: 'REJECTED',
-    created_at: '2026-08-15',
-  },
-  {
-    id: 'CR-1006',
-    cash_voucher: 'CV-2026-006',
-    requester_name: 'Maria Clara',
-    department_id: 6,
-    department_name: 'Finance',
-    project_name: 'Internal Compliance Audit',
-    purpose: 'Notary fees for legal compliance docs',
-    amount_requested: 1500.0,
-    status: 'COMPLETED',
-    created_at: '2026-08-10',
-  },
-]
-
-function useCashRequests(filters = {}) {
+/**
+ * Wraps cashRequestApi with list state + the full workflow actions
+ * (create -> edit/resubmit -> approve/reject -> complete/reject).
+ * Mirrors useCashDisbursements.js's shape and invalidation pattern: local
+ * useState list (not react-query) refetched after every mutation, with a
+ * shared runMutation() helper returning { success, message } so modals
+ * can decide whether to close themselves.
+ *
+ * IMPORTANT: only completing a request (disburseRequest, below) actually
+ * moves money. It creates a new cash_disbursement row and moves the
+ * Fund-Custodian-selected revolving_fund's balance/status server-side —
+ * an IDENTICAL cascade to cashDisbursementController.js's
+ * issueCashDisbursement (see completeCashRequest's docstring on the
+ * backend). That means both the Revolving Funds cache AND the Budgets
+ * cache can go stale from this page. Both are invalidated after
+ * disburseRequest only — create/edit/approve/reject never move money, so
+ * they never invalidate them.
+ */
+export function useCashRequests({ role, ...initialParams } = {}) {
+  const [requests, setRequests] = useState([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [isMutating, setIsMutating] = useState(false)
   const queryClient = useQueryClient()
 
-  // React Query Fetch
-  const {
-    data: rawRequests = [],
-    isLoading,
-    error,
-    refetch: fetchCashRequests,
-  } = useQuery({
-    queryKey: ['cashRequests', filters],
-    queryFn: async () => {
-      return MOCK_CASH_REQUESTS
-    },
-  })
+  const fetchCashRequests = useCallback(async (params = initialParams) => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const data = await cashRequestApi.getAll(params)
+      setRequests(data || [])
+    } catch (err) {
+      console.error('Failed to fetch cash requests:', err)
+      setError(err.response?.data?.message || 'Failed to load cash requests.')
+    } finally {
+      setIsLoading(false)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
-  // Optional department fetch to enrich display names
-  const { data: departments = [] } = useQuery({
-    queryKey: ['departments'],
-    queryFn: async () => {
+  useEffect(() => {
+    fetchCashRequests()
+  }, [fetchCashRequests])
+
+  const invalidateFinancialCaches = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ['revolvingFunds'] })
+    queryClient.invalidateQueries({ queryKey: ['budgets'] })
+  }, [queryClient])
+
+  const runMutation = useCallback(
+    async (fn, payload, { invalidateFinancial = false } = {}) => {
+      setIsMutating(true)
       try {
-        return await departmentApi.getAll()
-      } catch {
-        return []
+        const result = await fn(payload)
+        await fetchCashRequests()
+        if (invalidateFinancial) invalidateFinancialCaches()
+        return { success: true, data: result }
+      } catch (err) {
+        console.error('Cash request mutation failed:', err)
+        const message = err.response?.data?.message || 'Something went wrong. Please try again.'
+        return { success: false, message }
+      } finally {
+        setIsMutating(false)
       }
     },
-  })
-
-  const getDepartmentName = useCallback(
-    (row) => {
-      if (row?.department?.name) return row.department.name
-      if (row?.department_name) return row.department_name
-      const matched = departments.find((d) => String(d.id) === String(row?.department_id))
-      return matched?.name || `Department #${row?.department_id ?? 'N/A'}`
-    },
-    [departments],
+    [fetchCashRequests, invalidateFinancialCaches],
   )
 
-  // Map and normalize statuses and project info
-  const requests = useMemo(() => {
-    if (!Array.isArray(rawRequests)) return []
-    return rawRequests.map((item) => {
-      const rawStatus = String(item.status || 'PENDING').toUpperCase()
-      let normalizedStatus = rawStatus
+  // Requester creates a request -> PENDING. No financial effect, no
+  // Revolving Fund selection.
+  const createRequest = useCallback(
+    (payload) => runMutation(cashRequestApi.create, payload),
+    [runMutation],
+  )
 
-      if (rawStatus.includes('PENDING')) normalizedStatus = 'PENDING'
-      else if (rawStatus.includes('REJECT')) normalizedStatus = 'REJECTED'
-      else if (['DISBURSED', 'LIQUIDATED', 'COMPLETED'].includes(rawStatus))
-        normalizedStatus = 'COMPLETED'
-      else if (rawStatus === 'APPROVED') normalizedStatus = 'APPROVED'
+  // Requester edits + resubmits a PENDING or REJECTED request. Backend
+  // resets it to PENDING (back in the Team Lead queue). No financial
+  // effect — never invalidates financial caches.
+  const editRequest = useCallback(
+    (id, payload = {}) => runMutation(cashRequestApi.update, { id, ...payload }),
+    [runMutation],
+  )
 
-      return {
-        ...item,
-        status: normalizedStatus,
-        department_name: getDepartmentName(item),
-        project_name: item.project_name || item.project || 'General / Internal',
-      }
-    })
-  }, [rawRequests, getDepartmentName])
+  // Team Lead approves a PENDING request -> APPROVED (pending Fund
+  // Custodian). No financial effect.
+  const approveRequest = useCallback(
+    (id, payload = {}) => runMutation(cashRequestApi.approve, { id, ...payload }),
+    [runMutation],
+  )
 
-  // Summary Metrics Aggregation based on updated statuses
+  // Team Lead (PENDING) or Fund Custodian (APPROVED) rejects -> REJECTED.
+  // No financial effect.
+  const rejectRequest = useCallback(
+    (id, payload = {}) => runMutation(cashRequestApi.reject, { id, ...payload }),
+    [runMutation],
+  )
+
+  // Fund Custodian completes an APPROVED request -> COMPLETED. THIS is
+  // the step that creates a Cash Disbursement and moves fund/budget
+  // figures — the only mutation in this hook that invalidates the
+  // financial caches. Payload must include the Fund-Custodian-selected
+  // revolving_fund_id. UI-facing verb is "Disburse"; backend/API name is
+  // "complete" (cashRequestApi.complete -> PUT /cash-request/complete).
+  const disburseRequest = useCallback(
+    (id, payload = {}) =>
+      runMutation(cashRequestApi.complete, { id, ...payload }, { invalidateFinancial: true }),
+    [runMutation],
+  )
+
+  // role is accepted but not yet used to filter server-side — the backend
+  // getCashRequest only supports `status`/`employee_id` query params.
+  // Role only drives which action buttons render client-side (see
+  // requestColumns.js).
+  void role
+
+  // Derived metrics for the StatCard banner. Deliberately does NOT
+  // include "Disbursed"/"Unliquidated" totals — those are Cash
+  // Disbursement figures (see the Disbursements page).
   const metrics = useMemo(() => {
     return requests.reduce(
-      (acc, item) => {
-        const amt = parseFloat(item.amount_requested || 0)
-        const status = item.status
+      (acc, req) => {
+        const amount = parseFloat(req.amount || 0)
+        const status = String(req.status || '').toUpperCase()
 
-        acc.totalRequested += amt
-
+        if (status !== 'REJECTED') {
+          acc.totalRequested += amount
+        }
         if (status === 'PENDING') {
           acc.pendingCount += 1
-          acc.pendingAmount += amt
-        } else if (status === 'APPROVED') {
-          acc.approvedAmount += amt
-          acc.approvedCount += 1
-        } else if (status === 'COMPLETED') {
-          acc.completedAmount += amt
-          acc.completedCount += 1
-        } else if (status === 'REJECTED') {
-          acc.rejectedAmount += amt
-          acc.rejectedCount += 1
         }
-
+        if (status === 'APPROVED') {
+          acc.approvedAmount += amount
+        }
+        if (status === 'COMPLETED') {
+          acc.completedAmount += amount
+        }
         return acc
       },
-      {
-        totalRequested: 0,
-        pendingCount: 0,
-        pendingAmount: 0,
-        approvedAmount: 0,
-        approvedCount: 0,
-        completedAmount: 0,
-        completedCount: 0,
-        rejectedAmount: 0,
-        rejectedCount: 0,
-      },
+      { totalRequested: 0, pendingCount: 0, approvedAmount: 0, completedAmount: 0 },
     )
   }, [requests])
-
-  // Placeholder mutation hook for future delete/cancel functionality
-  const deleteMutation = useMutation({
-    mutationFn: async (id) => {
-      return true
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['cashRequests'] })
-    },
-    onError: (err) => {
-      alert(err?.response?.data?.message || 'Failed to delete request record.')
-    },
-  })
-
-  const handleDelete = (row, e) => {
-    e?.stopPropagation?.()
-    if (window.confirm(`Are you sure you want to delete request ${row.cash_voucher || row.id}?`)) {
-      deleteMutation.mutate(row.id)
-    }
-  }
 
   return {
     requests,
     metrics,
-    departments,
     isLoading,
-    error: error ? error.response?.data?.message || 'Failed to load cash requests.' : null,
+    isMutating,
+    error,
     fetchCashRequests,
-    getDepartmentName,
-    handleDelete,
-    isDeleting: deleteMutation.isPending,
+    createRequest,
+    editRequest,
+    approveRequest,
+    rejectRequest,
+    disburseRequest,
   }
 }
 

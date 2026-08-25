@@ -11,23 +11,19 @@ import {
   CheckCircle2,
   AlertCircle,
   Banknote,
-  Receipt,
   Loader2,
   FileText,
 } from 'lucide-react'
 
 import { createRequestColumns } from '../../../config/tables/requestColumns'
 
-// Modal Component Imports (Commented out for frontend-only state)
-// import CreateCashRequestModal from '../../../components/dashboard/request/CreateCashRequestModal'
-// import ViewCashRequestModal from '../../../components/dashboard/request/ViewCashRequestModal'
-// import ApproveCashRequestModal from '../../../components/dashboard/request/ApproveCashRequestModal'
-// import DisburseCashRequestModal from '../../../components/dashboard/request/DisburseCashRequestModal'
+import CreateCashRequestModal from '../../../components/dashboard/request/CreateCashRequestModal'
+import ViewCashRequestModal from '../../../components/dashboard/request/ViewCashRequestModal'
+import ApproveCashRequestModal from '../../../components/dashboard/request/ApproveCashRequestModal'
+import DisburseCashRequestModal from '../../../components/dashboard/request/DisburseCashRequestModal'
 
-// Custom Hooks
 import useCashRequests from '../../../hooks/useCashRequests'
-import useCashRequestForm from '../../../hooks/useCashRequestForm'
-import useBudgets from '../../../hooks/useBudgets'
+import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
 
 export const Route = createFileRoute('/_authenticated/workbench/request')({
   component: CashRequestPage,
@@ -41,149 +37,124 @@ const formatCurrency = (val) =>
   }).format(val || 0)
 
 function CashRequestPage() {
+  // TODO: replace with the real authenticated user's role + employee id
+  // once auth is wired up. 'ADMINISTRATOR' satisfies the Requester,
+  // Approve, and Complete gates in requestColumns.js so every stage of
+  // the workflow is visible/testable before RBAC lands. currentEmployeeId
+  // is what requestColumns.js uses to decide row ownership for Edit —
+  // wire it to the real logged-in employee id once available.
   const userRole = 'ADMINISTRATOR'
+  const currentEmployeeId = null
 
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('ALL')
-
-  // Row Selection State
   const [selectedIds, setSelectedIds] = useState([])
-  const [selectedRowObjects, setSelectedRowObjects] = useState([])
 
-  // Fetch Budget context for resolving department / fund labels
-  const { budgets = [], getDepartmentName, isLoading: isBudgetsLoading } = useBudgets()
+  const {
+    revolvingFunds,
+    departments,
+    employees,
+    particulars,
+    getDepartmentName,
+    getEmployeeName,
+    getFundLabel,
+  } = useCashDisbursementLookups()
 
-  // Primary Data Hook
   const {
     requests = [],
     metrics = {},
     isLoading,
+    isMutating,
     error,
     fetchCashRequests,
+    createRequest,
+    editRequest,
     approveRequest,
+    rejectRequest,
     disburseRequest,
   } = useCashRequests({ role: userRole })
 
-  // Creation Modal Hook
-  const {
-    isModalOpen: isCreateOpen,
-    formData,
-    setFormData,
-    handleOpenModal: handleOpenCreateModal,
-    handleCloseModal: handleCloseCreateModal,
-    handleSubmit: handleCreateSubmit,
-    isSubmitting: isCreating,
-  } = useCashRequestForm()
-
-  // Modal State Control
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [editingRequest, setEditingRequest] = useState(null)
   const [selectedRequest, setSelectedRequest] = useState(null)
-  const [isViewOpen, setIsViewOpen] = useState(false)
-  const [isApproveOpen, setIsApproveOpen] = useState(false)
-  const [isDisburseOpen, setIsDisburseOpen] = useState(false)
+  const [activeModal, setActiveModal] = useState(null) // 'view' | 'approve' | 'disburse'
 
-  // Resolve Department or Fund origin label for request rows
-  const getRequestBudgetLabel = useCallback(
-    (row) => {
-      const budgetId = row?.budget_id
-      const budget = budgets.find((b) => String(b.id) === String(budgetId))
-      if (!budget) return `Budget #${budgetId ?? 'N/A'}`
-
-      const deptName = getDepartmentName
-        ? getDepartmentName(budget)
-        : `Dept #${budget.department_id}`
-      return budget.type ? `${deptName} — ${budget.type}` : deptName
-    },
-    [budgets, getDepartmentName],
-  )
-
-  // Selection Handler
-  const handleSelectionChange = useCallback((keys, selectedObjects) => {
-    setSelectedIds(keys)
-    setSelectedRowObjects(selectedObjects)
-  }, [])
-
-  // Action Handlers
   const handleView = useCallback((row) => {
     setSelectedRequest(row)
-    setIsViewOpen(true)
+    setActiveModal('view')
   }, [])
 
-  const handleCloseView = useCallback(() => {
-    setIsViewOpen(false)
-    setSelectedRequest(null)
+  const handleEdit = useCallback((row) => {
+    setEditingRequest(row)
+    setIsCreateOpen(true)
   }, [])
 
   const handleApproveAction = useCallback((row) => {
     setSelectedRequest(row)
-    setIsApproveOpen(true)
+    setActiveModal('approve')
   }, [])
-
-  const handleCloseApprove = useCallback(() => {
-    setIsApproveOpen(false)
-    setSelectedRequest(null)
-  }, [])
-
-  const handleConfirmApprove = useCallback(
-    async (payload) => {
-      if (approveRequest) {
-        await approveRequest(selectedRequest?.id, payload)
-      }
-      handleCloseApprove()
-    },
-    [approveRequest, selectedRequest, handleCloseApprove],
-  )
 
   const handleDisburseAction = useCallback((row) => {
     setSelectedRequest(row)
-    setIsDisburseOpen(true)
+    setActiveModal('disburse')
   }, [])
 
-  const handleCloseDisburse = useCallback(() => {
-    setIsDisburseOpen(false)
+  const handleCloseModal = useCallback(() => {
+    setActiveModal(null)
     setSelectedRequest(null)
   }, [])
 
-  const handleConfirmDisburse = useCallback(
-    async (payload) => {
-      if (disburseRequest) {
-        await disburseRequest(selectedRequest?.id, payload)
-      }
-      handleCloseDisburse()
-    },
-    [disburseRequest, selectedRequest, handleCloseDisburse],
-  )
+  const handleCloseCreateModal = useCallback(() => {
+    setIsCreateOpen(false)
+    setEditingRequest(null)
+  }, [])
 
-  // Filtering Logic
+  const handleSelectionChange = useCallback((keys) => {
+    setSelectedIds(keys)
+  }, [])
+
   const filteredRequests = useMemo(() => {
     return requests.filter((req) => {
-      const voucherNo = String(req.cash_voucher || req.id || '')
-      const requesterName = String(req.requester_name || '')
-      const purpose = String(req.purpose || '')
+      const q = searchTerm.toLowerCase()
+      const requesterName = getEmployeeName(req.employee_id).toLowerCase()
 
       const matchesSearch =
-        voucherNo.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        requesterName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        purpose.toLowerCase().includes(searchTerm.toLowerCase())
+        (req.reference_id || '').toLowerCase().includes(q) ||
+        (req.project || '').toLowerCase().includes(q) ||
+        (req.purpose || '').toLowerCase().includes(q) ||
+        requesterName.includes(q)
 
       const matchesStatus =
-        statusFilter === 'ALL' ||
-        String(req.status || '').toUpperCase() === statusFilter.toUpperCase()
+        statusFilter === 'ALL' || String(req.status || '').toUpperCase() === statusFilter
 
       return matchesSearch && matchesStatus
     })
-  }, [requests, searchTerm, statusFilter])
+  }, [requests, searchTerm, statusFilter, getEmployeeName])
 
-  // Table Columns
   const columns = useMemo(
     () =>
       createRequestColumns({
         userRole,
+        currentEmployeeId,
         onView: handleView,
+        onEdit: handleEdit,
         onApprove: handleApproveAction,
-        onDisburse: handleDisburseAction,
-        getBudgetLabel: getRequestBudgetLabel,
+        onComplete: handleDisburseAction,
+        getEmployeeName,
+        getDepartmentName,
+        getFundLabel,
       }),
-    [userRole, handleView, handleApproveAction, handleDisburseAction, getRequestBudgetLabel],
+    [
+      userRole,
+      currentEmployeeId,
+      handleView,
+      handleEdit,
+      handleApproveAction,
+      handleDisburseAction,
+      getEmployeeName,
+      getDepartmentName,
+      getFundLabel,
+    ],
   )
 
   return (
@@ -195,8 +166,8 @@ function CashRequestPage() {
             Cash Requests & Advances
           </h1>
           <p className="text-slate-500 text-xs mt-0.5">
-            Process petty cash requisitions, approval pipelines, fund disbursements, and receipt
-            liquidations.
+            Submit cash requisitions and process the Team Leader approval and Fund Custodian
+            disbursement pipeline.
           </p>
         </div>
 
@@ -211,7 +182,10 @@ function CashRequestPage() {
 
           <button
             type="button"
-            onClick={handleOpenCreateModal}
+            onClick={() => {
+              setEditingRequest(null)
+              setIsCreateOpen(true)
+            }}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#E31837] hover:bg-[#c4122e] text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -221,45 +195,34 @@ function CashRequestPage() {
       </div>
 
       {/* Metrics Banner */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 shrink-0">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
         <StatCard
           title="Total Requested"
           value={formatCurrency(metrics?.totalRequested)}
           icon={FileText}
-          subtitle="All active requests"
+          subtitle="Excludes rejected"
           variant="blue"
         />
-
         <StatCard
-          title="Pending Approval"
+          title="Pending Team Leader"
           value={metrics?.pendingCount || 0}
           icon={Clock}
-          subtitle="Awaiting L1/L2 Action"
+          subtitle="Awaiting first approval"
           variant="amber"
         />
-
         <StatCard
-          title="Ready for Cash"
+          title="Pending Fund Custodian"
           value={formatCurrency(metrics?.approvedAmount)}
           icon={CheckCircle2}
-          subtitle="Approved; queue disburse"
+          subtitle="Team Leader approved"
           variant="emerald"
         />
-
         <StatCard
-          title="Disbursed"
-          value={formatCurrency(metrics?.disbursedAmount)}
+          title="Completed"
+          value={formatCurrency(metrics?.completedAmount)}
           icon={Banknote}
-          subtitle="Issued advances"
+          subtitle="Disbursed to date"
           variant="blue"
-        />
-
-        <StatCard
-          title="Unliquidated"
-          value={formatCurrency(metrics?.unliquidatedAmount)}
-          icon={Receipt}
-          subtitle="Pending receipts"
-          variant="red"
         />
       </div>
 
@@ -269,7 +232,7 @@ function CashRequestPage() {
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search Voucher, Requester, Purpose..."
+            placeholder="Search Reference, Project, Purpose, Requester..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-8 pr-3 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
@@ -286,12 +249,9 @@ function CashRequestPage() {
               className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer text-xs"
             >
               <option value="ALL">All Statuses</option>
-              <option value="PENDING_TL">Pending Team Leader</option>
-              <option value="PENDING_CUSTODIAN">Pending Custodian</option>
-              <option value="APPROVED">Approved</option>
-              <option value="DISBURSED">Disbursed</option>
-              <option value="PENDING_LIQUIDATION">Pending Liquidation</option>
-              <option value="LIQUIDATED">Liquidated</option>
+              <option value="PENDING">Pending Team Leader</option>
+              <option value="APPROVED">Pending Fund Custodian</option>
+              <option value="COMPLETED">Completed</option>
               <option value="REJECTED">Rejected</option>
             </select>
           </div>
@@ -326,7 +286,7 @@ function CashRequestPage() {
           <DataTable
             columns={columns}
             data={filteredRequests}
-            keyExtractor={(row) => row.id || row.cash_voucher}
+            keyExtractor={(row) => row.id}
             selectable={true}
             selectedRows={selectedIds}
             onSelectionChange={handleSelectionChange}
@@ -350,42 +310,59 @@ function CashRequestPage() {
         )}
       </div>
 
-      {/* Modals (Commented out for frontend-only state) */}
-      {/* 
-      <CreateCashRequestModal
-        isOpen={isCreateOpen}
-        onClose={handleCloseCreateModal}
-        formData={formData}
-        setFormData={setFormData}
-        onSubmit={handleCreateSubmit}
-        isSubmitting={isCreating}
-        budgets={budgets}
-        isBudgetsLoading={isBudgetsLoading}
-      />
+      {/* Modals */}
+      {isCreateOpen && (
+        <CreateCashRequestModal
+          isOpen={isCreateOpen}
+          onClose={handleCloseCreateModal}
+          onCreate={createRequest}
+          onUpdate={(payload) => editRequest(payload.id, payload)}
+          isSubmitting={isMutating}
+          employees={employees}
+          departments={departments}
+          editingRequest={editingRequest}
+        />
+      )}
 
-      <ViewCashRequestModal
-        isOpen={isViewOpen}
-        onClose={handleCloseView}
-        request={selectedRequest}
-        getBudgetLabel={getRequestBudgetLabel}
-      />
+      {activeModal === 'view' && selectedRequest && (
+        <ViewCashRequestModal
+          isOpen
+          onClose={handleCloseModal}
+          request={selectedRequest}
+          getEmployeeName={getEmployeeName}
+          getDepartmentName={getDepartmentName}
+          getFundLabel={getFundLabel}
+        />
+      )}
 
-      <ApproveCashRequestModal
-        isOpen={isApproveOpen}
-        onClose={handleCloseApprove}
-        request={selectedRequest}
-        onConfirm={handleConfirmApprove}
-        getBudgetLabel={getRequestBudgetLabel}
-      />
+      {activeModal === 'approve' && selectedRequest && (
+        <ApproveCashRequestModal
+          isOpen
+          onClose={handleCloseModal}
+          request={selectedRequest}
+          onApprove={(payload) => approveRequest(selectedRequest.id, payload)}
+          onReject={(payload) => rejectRequest(selectedRequest.id, payload)}
+          isSubmitting={isMutating}
+          getDepartmentName={getDepartmentName}
+          getEmployeeName={getEmployeeName}
+        />
+      )}
 
-      <DisburseCashRequestModal
-        isOpen={isDisburseOpen}
-        onClose={handleCloseDisburse}
-        request={selectedRequest}
-        onConfirm={handleConfirmDisburse}
-        getBudgetLabel={getRequestBudgetLabel}
-      /> 
-      */}
+      {activeModal === 'disburse' && selectedRequest && (
+        <DisburseCashRequestModal
+          isOpen
+          onClose={handleCloseModal}
+          request={selectedRequest}
+          particulars={particulars}
+          revolvingFunds={revolvingFunds}
+          onDisburse={(payload) => disburseRequest(selectedRequest.id, payload)}
+          onReject={(payload) => rejectRequest(selectedRequest.id, payload)}
+          isSubmitting={isMutating}
+          getFundLabel={getFundLabel}
+          getDepartmentName={getDepartmentName}
+          getEmployeeName={getEmployeeName}
+        />
+      )}
     </div>
   )
 }

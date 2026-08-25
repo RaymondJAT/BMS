@@ -206,29 +206,19 @@ const createCashRequest = async (req, res) => {
   */
 
   const userId = req.userId || req.user?.id || 1
-  const {
-    project,
-    purpose,
-    amount,
-    revolving_fund_id,
-    employee_id,
-    department_id,
-    team_lead,
-    request_date,
-  } = req.body
+  const { project, purpose, amount, employee_id, department_id, team_lead, request_date } = req.body
 
   if (
     !project ||
     !purpose ||
     amount === undefined ||
-    !revolving_fund_id ||
     !employee_id ||
     !department_id ||
     !team_lead
   ) {
     return res.status(400).json({
       message:
-        'Missing required fields: project, purpose, amount, revolving_fund_id, employee_id, department_id, team_lead',
+        'Missing required fields: project, purpose, amount, employee_id, department_id, team_lead',
     })
   }
 
@@ -238,35 +228,16 @@ const createCashRequest = async (req, res) => {
   }
 
   try {
-    const rf = await getRevolvingFundById(revolving_fund_id)
-    if (!rf) {
-      return res.status(404).json({ message: 'Revolving fund not found' })
-    }
-
-    const rfStatus = rf[Revolving.Fund.cols.status]
-    if (NON_ISSUABLE_RF_STATUSES.includes(rfStatus)) {
-      return res.status(400).json({
-        message: `Cannot request cash against a revolving fund with status ${rfStatus}.`,
-      })
-    }
-
     const referenceId = await generateReferenceId()
 
-    // cr_id is autoincrement and the activity insert below needs it, so —
-    // same pattern as issueCashDisbursement — this insert stays standalone
-    // rather than batching into the activity's transaction.
     const insertQuery = SQL.model(Cash.Request)
       .insert({
         [Cash.Request.cols.reference_id]: referenceId,
-        // cv_number is finalized at completion, not creation (mirrors V1's
-        // createcash_request, which also inserts a placeholder here) —
-        // cr_cv_number is NOT NULL, so an empty string stands in until
-        // completeCashRequest sets the real voucher number.
         [Cash.Request.cols.cv_number]: '',
         [Cash.Request.cols.purpose]: purpose,
         [Cash.Request.cols.project]: project,
         [Cash.Request.cols.amount]: requestAmount,
-        [Cash.Request.cols.revolving_fund_id]: revolving_fund_id,
+        [Cash.Request.cols.revolving_fund_id]: null,
         [Cash.Request.cols.employee_id]: employee_id,
         [Cash.Request.cols.department_id]: department_id,
         [Cash.Request.cols.team_lead]: team_lead,
@@ -428,10 +399,17 @@ const rejectCashRequest = async (req, res) => {
 
     const currentStatus = cr[Cash.Request.cols.status]
     if (!['PENDING', 'APPROVED'].includes(currentStatus)) {
-      return res.status(400).json({
-        message: `Cannot reject a cash request with status ${currentStatus}.`,
-      })
+      return res
+        .status(400)
+        .json({ message: `Cannot reject a cash request with status ${currentStatus}.` })
     }
+
+    // PENDING = still with the Team Leader. APPROVED = Team-Lead-approved,
+    // now with the Fund Custodian. This is the only reliable, no-migration
+    // way to know who was rejecting, since cr_status doesn't retain it after
+    // the flip to REJECTED.
+    const rejectingStage = currentStatus === 'PENDING' ? 'Team Leader' : 'Fund Custodian'
+    const prefixedRemarks = `Rejected by ${rejectingStage}: ${remarks}`
 
     const updateQuery = SQL.model(Cash.Request)
       .update({ [Cash.Request.cols.status]: 'REJECTED' })
@@ -443,16 +421,91 @@ const rejectCashRequest = async (req, res) => {
         [Cash.RequestActivity.cols.user_id]: userId,
         [Cash.RequestActivity.cols.cash_request_id]: id,
         [Cash.RequestActivity.cols.action]: 'REJECTED',
-        [Cash.RequestActivity.cols.remarks]: remarks,
+        [Cash.RequestActivity.cols.remarks]: prefixedRemarks,
+      })
+      .build()
+
+    await Transaction([toTxQuery(updateQuery), toTxQuery(activityQuery)])
+    return res.status(200).json({ message: 'Cash request rejected successfully' })
+  } catch (error) {
+    console.error('Error in rejectCashRequest:', error)
+    return res.status(500).json({ message: 'Error rejecting cash request' })
+  }
+}
+
+// ── NEW: updateCashRequest ────────────────────────────────────────
+/**
+ * @name updateCashRequest
+ * @description Requester edits their own Cash Request. Only allowed while
+ *              status is PENDING (not yet Team-Lead-acted-on) or REJECTED
+ *              (returned for correction). Saving always resets status to
+ *              PENDING and logs a REQUESTED activity entry — a resubmit is
+ *              modeled as re-entering the Team Leader queue, matching
+ *              §8's suggested flow (REJECTED -> REQUESTER EDIT -> PENDING_TEAM_LEADER).
+ *              Never touches revolving_fund_id, cv_number, or status fields
+ *              beyond the reset above — those are owned by the approval
+ *              stages, not by an edit.
+ */
+const updateCashRequest = async (req, res) => {
+  const userId = req.userId || req.user?.id || 1
+  const { id, project, purpose, amount, employee_id, department_id, team_lead, request_date } =
+    req.body
+
+  if (!id) {
+    return res.status(400).json({ message: 'Missing required field: id' })
+  }
+
+  try {
+    const cr = await getCashRequestById(id)
+    if (!cr) {
+      return res.status(404).json({ message: 'Cash request not found' })
+    }
+
+    const currentStatus = cr[Cash.Request.cols.status]
+    if (!['PENDING', 'REJECTED'].includes(currentStatus)) {
+      return res.status(400).json({
+        message: `Cannot edit a cash request with status ${currentStatus}. Only PENDING or REJECTED requests can be edited.`,
+      })
+    }
+
+    const updateData = { [Cash.Request.cols.status]: 'PENDING' }
+    if (project !== undefined) updateData[Cash.Request.cols.project] = project
+    if (purpose !== undefined) updateData[Cash.Request.cols.purpose] = purpose
+    if (amount !== undefined) {
+      const newAmount = parseNum(amount)
+      if (newAmount <= 0) {
+        return res.status(400).json({ message: 'amount must be greater than zero' })
+      }
+      updateData[Cash.Request.cols.amount] = newAmount
+    }
+    if (employee_id !== undefined) updateData[Cash.Request.cols.employee_id] = employee_id
+    if (department_id !== undefined) updateData[Cash.Request.cols.department_id] = department_id
+    if (team_lead !== undefined) updateData[Cash.Request.cols.team_lead] = team_lead
+    if (request_date !== undefined) updateData[Cash.Request.cols.request_date] = request_date
+
+    const updateQuery = SQL.model(Cash.Request)
+      .update(updateData)
+      .where(Cash.Request.pk, id)
+      .build()
+
+    const activityQuery = SQL.model(Cash.RequestActivity)
+      .insert({
+        [Cash.RequestActivity.cols.user_id]: userId,
+        [Cash.RequestActivity.cols.cash_request_id]: id,
+        [Cash.RequestActivity.cols.action]: 'REQUESTED',
+        [Cash.RequestActivity.cols.remarks]:
+          currentStatus === 'REJECTED'
+            ? 'Edited and resubmitted after rejection — back in the Team Leader queue.'
+            : 'Edited while pending Team Leader approval.',
       })
       .build()
 
     await Transaction([toTxQuery(updateQuery), toTxQuery(activityQuery)])
 
-    return res.status(200).json({ message: 'Cash request rejected successfully' })
+    return res.status(200).json({ message: 'Cash request updated and resubmitted successfully' })
   } catch (error) {
-    console.error('Error in rejectCashRequest:', error)
-    return res.status(500).json({ message: 'Error rejecting cash request' })
+    console.error('Error in updateCashRequest:', error)
+    return res.status(500).json({ message: 'Error updating cash request' })
   }
 }
 
@@ -515,34 +568,32 @@ const completeCashRequest = async (req, res) => {
   */
 
   const userId = req.userId || req.user?.id || 1
-  const { id, cash_voucher, particulars, remarks } = req.body
+  const { id, revolving_fund_id, cash_voucher, particulars, remarks } = req.body
 
-  if (!id) {
-    return res.status(400).json({ message: 'Missing required field: id' })
-  }
-  if (particulars === undefined || particulars === null || particulars === '') {
+  if (!id) return res.status(400).json({ message: 'Missing required field: id' })
+  if (!revolving_fund_id) {
     return res.status(400).json({
       message:
-        'Missing required field: particulars (master_particulars id) — cd_particulars is required and Purpose does not map to it automatically.',
+        'Missing required field: revolving_fund_id — the Fund Custodian must select a fund before approving.',
     })
+  }
+  if (particulars === undefined || particulars === null || particulars === '') {
+    return res.status(400).json({ message: 'Missing required field: particulars' })
   }
 
   if (!requireRole(req, res, ['FUND_CUSTODIAN', 'ADMIN'])) return
 
   try {
     const cr = await getCashRequestById(id)
-    if (!cr) {
-      return res.status(404).json({ message: 'Cash request not found' })
-    }
+    if (!cr) return res.status(404).json({ message: 'Cash request not found' })
 
     const currentStatus = cr[Cash.Request.cols.status]
-
     if (currentStatus === 'COMPLETED') {
       return res.status(400).json({ message: 'This cash request has already been completed.' })
     }
     if (currentStatus !== 'APPROVED') {
       return res.status(400).json({
-        message: `Cannot complete a cash request with status ${currentStatus}. Only APPROVED requests can be completed.`,
+        message: `Cannot complete a cash request with status ${currentStatus}. Only APPROVED (Team-Lead-approved) requests can be completed.`,
       })
     }
 
@@ -574,17 +625,15 @@ const completeCashRequest = async (req, res) => {
       })
     }
 
-    const fundId = cr[Cash.Request.cols.revolving_fund_id]
+    const fundId = revolving_fund_id
     const rf = await getRevolvingFundById(fundId)
-    if (!rf) {
-      return res.status(404).json({ message: 'Associated revolving fund not found' })
-    }
+    if (!rf) return res.status(404).json({ message: 'Selected revolving fund not found' })
 
     const rfStatus = rf[Revolving.Fund.cols.status]
     if (NON_ISSUABLE_RF_STATUSES.includes(rfStatus)) {
-      return res.status(400).json({
-        message: `Cannot complete — its revolving fund has status ${rfStatus}.`,
-      })
+      return res
+        .status(400)
+        .json({ message: `Cannot complete — selected revolving fund has status ${rfStatus}.` })
     }
 
     const currentBalance = parseNum(rf[Revolving.Fund.cols.balance])
@@ -670,6 +719,7 @@ const completeCashRequest = async (req, res) => {
         .update({
           [Cash.Request.cols.status]: 'COMPLETED',
           [Cash.Request.cols.cv_number]: finalCashVoucher,
+          [Cash.Request.cols.revolving_fund_id]: fundId,
         })
         .where(Cash.Request.pk, id)
         .build()
@@ -798,6 +848,7 @@ module.exports = {
   createCashRequest,
   approveCashRequest,
   rejectCashRequest,
+  updateCashRequest,
   completeCashRequest,
   getCashRequestActivity,
 }

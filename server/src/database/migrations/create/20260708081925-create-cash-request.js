@@ -39,7 +39,7 @@ module.exports = {
         },
         onUpdate: 'CASCADE',
         onDelete: 'RESTRICT',
-        allowNull: false,
+        allowNull: true,
       },
       cr_employee_id: {
         type: Sequelize.INTEGER,
