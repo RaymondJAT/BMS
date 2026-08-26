@@ -14,8 +14,6 @@ const { revolvingFundRouter } = require('../routes/revolving-fund.routes')
 const { cashDisbursementRouter } = require('../routes/cash-disbursement.routes')
 const { cashRequestRouter } = require('../routes/cash-request.routes')
 const { liquidationRouter } = require('../routes/liquidation-liquidation.routes')
-const { liquidationItemRouter } = require('../routes/liquidation-item.routes')
-const { liquidationActivityRouter } = require('../routes/liquidation-activity.routes')
 const { redFlagRouter } = require('../routes/red-flag.routes')
 
 const initRoutes = (app) => {
@@ -35,8 +33,6 @@ const initRoutes = (app) => {
   app.use('/cash-disbursement', cashDisbursementRouter)
   app.use('/cash-request', cashRequestRouter)
   app.use('/liquidation', liquidationRouter)
-  app.use('/liquidation-item', liquidationItemRouter)
-  app.use('/liquidation-activity', liquidationActivityRouter)
   app.use('/red-flag', redFlagRouter)
 }
 

@@ -56,11 +56,9 @@ const requireRole = (req, res, allowedRoles) => {
     return true
   }
   if (!allowedRoles.includes(role)) {
-    res
-      .status(403)
-      .json({
-        message: `This action requires one of the following roles: ${allowedRoles.join(', ')}.`,
-      })
+    res.status(403).json({
+      message: `This action requires one of the following roles: ${allowedRoles.join(', ')}.`,
+    })
     return false
   }
   return true
@@ -129,8 +127,12 @@ const toReferenceId = (id) => `LQ-${String(id).padStart(6, '0')}`
 
 /**
  * True if this employee has a COMPLETED Cash Request whose Cash
- * Disbursement is still UNLIQUIDATED — independent of whether a
- * liquidation row exists yet (§3). Reused as-is by cash-request.controller.js.
+ * Disbursement is still UNLIQUIDATED. Since settlement (and the resulting
+ * LIQUIDATED status) now happens at verifyLiquidation instead of
+ * completeLiquidation (see that function's docstring below), this
+ * unblocks a Requester's next Cash Request as soon as the Fund Custodian
+ * verifies their liquidation — they no longer have to wait for Finance's
+ * post-audit sign-off, which matches the corrected workflow.
  */
 const hasOutstandingLiquidation = async (employeeId) => {
   const rows = await Query(
@@ -319,13 +321,11 @@ const createLiquidation = async (req, res) => {
       throw txError
     }
 
-    return res
-      .status(201)
-      .json({
-        message: 'Liquidation submitted successfully',
-        id: newLiquidationId,
-        reference_id: toReferenceId(newLiquidationId),
-      })
+    return res.status(201).json({
+      message: 'Liquidation submitted successfully',
+      id: newLiquidationId,
+      reference_id: toReferenceId(newLiquidationId),
+    })
   } catch (error) {
     console.error('Error in createLiquidation:', error)
     return res.status(500).json({ message: 'Error creating liquidation' })
@@ -336,6 +336,24 @@ const createLiquidation = async (req, res) => {
 // WORKFLOW: UPDATE (Requester, PENDING/REJECTED/INCOMPLETE only)
 // ==========================================
 
+/**
+ * @name updateLiquidation
+ * @description Requester edits their own liquidation. Allowed only while
+ *              PENDING, REJECTED, or INCOMPLETE.
+ *
+ *              IMPORTANT — now that settlement happens at VERIFIED (see
+ *              verifyLiquidation), an edit made here while status is
+ *              INCOMPLETE (i.e. AFTER the Cash Disbursement/Revolving
+ *              Fund were already settled by a prior VERIFIED pass) only
+ *              updates this liquidation's own row/items. It does NOT, and
+ *              currently CANNOT, unwind or reapply the already-settled
+ *              cash_disbursement/revolving_fund changes — resubmitting
+ *              such a liquidation will hit verifyLiquidation's
+ *              already-LIQUIDATED guard and be rejected. See that
+ *              function's docstring for the full explanation; this is a
+ *              known workflow gap flagged for a product decision, not
+ *              something silently handled here.
+ */
 const updateLiquidation = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
   const { id, description, receipt, items } = req.body
@@ -425,6 +443,12 @@ const updateLiquidation = async (req, res) => {
 // WORKFLOW: TEAM LEADER APPROVE (PENDING -> APPROVED)
 // ==========================================
 
+/**
+ * @name approveLiquidation
+ * @description Team Leader's first-pass approval. No financial effect —
+ *              settlement doesn't happen until the Fund Custodian
+ *              verifies (see verifyLiquidation).
+ */
 const approveLiquidation = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
   const { id, remarks } = req.body
@@ -436,11 +460,9 @@ const approveLiquidation = async (req, res) => {
     const lq = await getLiquidationById(id)
     if (!lq) return res.status(404).json({ message: 'Liquidation not found' })
     if (lq[Liquidation.Liquidation.cols.status] !== 'PENDING') {
-      return res
-        .status(400)
-        .json({
-          message: `Cannot approve a liquidation with status ${lq[Liquidation.Liquidation.cols.status]}. Only PENDING liquidations can be approved.`,
-        })
+      return res.status(400).json({
+        message: `Cannot approve a liquidation with status ${lq[Liquidation.Liquidation.cols.status]}. Only PENDING liquidations can be approved.`,
+      })
     }
 
     const updateQuery = SQL.model(Liquidation.Liquidation)
@@ -470,9 +492,16 @@ const approveLiquidation = async (req, res) => {
 // ==========================================
 
 /**
- * la_action has no dedicated value distinguishing "rejected" from "which
- * stage rejected it" — same constraint that forced the stage-prefix
- * technique in rejectCashRequest. Reused here.
+ * @name rejectLiquidation
+ * @description Rejects a liquidation BEFORE settlement — allowed only
+ *              from PENDING (Team Leader declining) or APPROVED (Fund
+ *              Custodian declining before verifying/settling). Never from
+ *              VERIFIED — by then the Cash Disbursement/Revolving Fund
+ *              have already been settled by verifyLiquidation, so a plain
+ *              rejection no longer makes sense at that point (see
+ *              markLiquidationIncomplete for the equivalent at that
+ *              stage). No financial effect either way — the money hasn't
+ *              moved yet at PENDING/APPROVED.
  */
 const rejectLiquidation = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
@@ -523,8 +552,38 @@ const rejectLiquidation = async (req, res) => {
 
 // ==========================================
 // WORKFLOW: FUND CUSTODIAN VERIFY (APPROVED -> VERIFIED)
+// THIS is now where settlement actually happens.
 // ==========================================
 
+/**
+ * @name verifyLiquidation
+ * @description Fund Custodian's verification. THIS is now the step that
+ *              actually settles the money — moved here from
+ *              completeLiquidation, which is now a pure post-audit status
+ *              flip with no financial effect (see that function's
+ *              docstring). Mirrors the settlement cascade the old
+ *              completeLiquidation used to run: posts the liquidated
+ *              amount against the Cash Disbursement (expended/returned/
+ *              outstanding/status), and cascades to the Revolving Fund
+ *              (liquidated/expended/balance/outstanding/status).
+ *
+ *              Idempotency guard: refuses to settle a Cash Disbursement
+ *              that's already LIQUIDATED. This matters because a
+ *              liquidation CAN legally return to VERIFIED's precondition
+ *              (APPROVED) a second time — e.g. PENDING -> APPROVED ->
+ *              VERIFIED -> (Finance) INCOMPLETE -> (Requester edits,
+ *              resets to PENDING) -> APPROVED again. Without this guard,
+ *              a second verify would double-apply the settlement math
+ *              against an already-settled disbursement. With it, that
+ *              second verify attempt is correctly refused — which means,
+ *              as currently designed, a liquidation that reaches
+ *              INCOMPLETE after having been verified CANNOT actually be
+ *              re-verified. That's a known workflow gap: reversing an
+ *              already-settled disbursement/fund is a materially
+ *              different feature (undoing specific deltas, not re-running
+ *              forward math) that hasn't been built. Flagging it here
+ *              rather than silently allowing double-settlement.
+ */
 const verifyLiquidation = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
   const { id, remarks } = req.body
@@ -536,73 +595,19 @@ const verifyLiquidation = async (req, res) => {
     const lq = await getLiquidationById(id)
     if (!lq) return res.status(404).json({ message: 'Liquidation not found' })
     if (lq[Liquidation.Liquidation.cols.status] !== 'APPROVED') {
-      return res
-        .status(400)
-        .json({
-          message: `Cannot verify a liquidation with status ${lq[Liquidation.Liquidation.cols.status]}. Only APPROVED liquidations can be verified.`,
-        })
-    }
-
-    const updateQuery = SQL.model(Liquidation.Liquidation)
-      .update({ [Liquidation.Liquidation.cols.status]: 'VERIFIED' })
-      .where(Liquidation.Liquidation.pk, id)
-      .build()
-    const activityQuery = SQL.model(Liquidation.Activity)
-      .insert({
-        [Liquidation.Activity.cols.liquidation_id]: id,
-        [Liquidation.Activity.cols.action]: 'APPROVED',
-        [Liquidation.Activity.cols.remarks]: remarks || 'Verified by Fund Custodian.',
-        [Liquidation.Activity.cols.receipt]: '',
-        [Liquidation.Activity.cols.created_by]: userId,
+      return res.status(400).json({
+        message: `Cannot verify a liquidation with status ${lq[Liquidation.Liquidation.cols.status]}. Only APPROVED liquidations can be verified.`,
       })
-      .build()
-
-    await Transaction([toTxQuery(updateQuery), toTxQuery(activityQuery)])
-    return res.status(200).json({ message: 'Liquidation verified successfully' })
-  } catch (error) {
-    console.error('Error in verifyLiquidation:', error)
-    return res.status(500).json({ message: 'Error verifying liquidation' })
-  }
-}
-
-// ==========================================
-// WORKFLOW: FINANCE COMPLETE (VERIFIED -> COMPLETED), settles the CD
-// ==========================================
-
-/**
- * @name completeLiquidation
- * @description Finance's final post-audit action — the ONLY step that
- *              touches Cash Disbursement / Revolving Fund. Mirrors the
- *              settlement cascades already in cashDisbursementController.js
- *              (expended posting + own-fund return branch) rather than
- *              inventing a new one. Uses l_amount_obtained/l_amount_expended
- *              as already stored — these are recomputed on every
- *              create/update, so by VERIFIED (no further edits possible)
- *              they're already final.
- */
-const completeLiquidation = async (req, res) => {
-  const userId = req.userId || req.user?.id || 1
-  const { id, remarks } = req.body
-
-  if (!id) return res.status(400).json({ message: 'Missing required field: id' })
-  if (!requireRole(req, res, ['FINANCE', 'ADMIN'])) return
-
-  try {
-    const lq = await getLiquidationById(id)
-    if (!lq) return res.status(404).json({ message: 'Liquidation not found' })
-    if (lq[Liquidation.Liquidation.cols.status] !== 'VERIFIED') {
-      return res
-        .status(400)
-        .json({
-          message: `Cannot complete a liquidation with status ${lq[Liquidation.Liquidation.cols.status]}. Only VERIFIED liquidations can be completed.`,
-        })
     }
 
     const cashRequestId = lq[Liquidation.Liquidation.cols.cash_request_id]
     const cd = await getDisbursementByCashRequestId(cashRequestId)
     if (!cd) return res.status(404).json({ message: 'Associated cash disbursement not found' })
     if (cd[Cash.Disbursement.cols.status] === 'LIQUIDATED') {
-      return res.status(400).json({ message: 'This cash disbursement is already liquidated.' })
+      return res.status(400).json({
+        message:
+          'This cash disbursement is already liquidated — this liquidation cannot be re-verified (see verifyLiquidation docstring).',
+      })
     }
 
     const cashReceived = parseNum(lq[Liquidation.Liquidation.cols.amount_obtained])
@@ -655,7 +660,7 @@ const completeLiquidation = async (req, res) => {
             [Cash.DisbursementActivity.cols.cash_disbursement_id]: cdId,
             [Cash.DisbursementActivity.cols.amount]: totalLiquidated,
             [Cash.DisbursementActivity.cols.remarks]:
-              `Settled via Liquidation ${toReferenceId(id)} — expended ₱${expendedToPost.toFixed(2)}, returned ₱${cashToReturn.toFixed(2)}.`,
+              `Settled via Liquidation ${toReferenceId(id)} (verified by Fund Custodian) — expended ₱${expendedToPost.toFixed(2)}, returned ₱${cashToReturn.toFixed(2)}.`,
             [Cash.DisbursementActivity.cols.particulars]: 'Liquidation Settlement',
           })
           .build(),
@@ -674,7 +679,7 @@ const completeLiquidation = async (req, res) => {
       ),
       toTxQuery(
         SQL.model(Liquidation.Liquidation)
-          .update({ [Liquidation.Liquidation.cols.status]: 'COMPLETED' })
+          .update({ [Liquidation.Liquidation.cols.status]: 'VERIFIED' })
           .where(Liquidation.Liquidation.pk, id)
           .build(),
       ),
@@ -682,10 +687,10 @@ const completeLiquidation = async (req, res) => {
         SQL.model(Liquidation.Activity)
           .insert({
             [Liquidation.Activity.cols.liquidation_id]: id,
-            [Liquidation.Activity.cols.action]: 'RECEIVED',
+            [Liquidation.Activity.cols.action]: 'APPROVED',
             [Liquidation.Activity.cols.remarks]:
               remarks ||
-              `Post-audit completed. Cash Disbursement settled — status: ${newCdStatus}.`,
+              `Verified by Fund Custodian — cash disbursement settled, status: ${newCdStatus}.`,
             [Liquidation.Activity.cols.receipt]: '',
             [Liquidation.Activity.cols.created_by]: userId,
           })
@@ -696,26 +701,92 @@ const completeLiquidation = async (req, res) => {
     await Transaction(queries)
 
     return res.status(200).json({
-      message: 'Liquidation completed successfully',
+      message: 'Liquidation verified successfully — cash disbursement settled.',
       cash_disbursement_status: newCdStatus,
       cash_to_return: cashToReturn,
       reimbursement_owed: reimbursementOwed,
     })
   } catch (error) {
+    console.error('Error in verifyLiquidation:', error)
+    return res.status(500).json({ message: 'Error verifying liquidation', error: error.message })
+  }
+}
+
+// ==========================================
+// WORKFLOW: FINANCE POST-AUDIT (VERIFIED -> COMPLETED)
+// No financial effect anymore — settlement already happened at VERIFIED.
+// ==========================================
+
+/**
+ * @name completeLiquidation
+ * @description Finance's post-audit sign-off. Settlement has ALREADY
+ *              happened by this point (see verifyLiquidation) — this is
+ *              now a pure record-keeping status flip with NO effect on
+ *              Cash Disbursement or Revolving Fund. Kept as a separate
+ *              stage (rather than folding into verifyLiquidation) because
+ *              Finance's review is conceptually a compliance/audit check
+ *              on paperwork that already-moved money, not a financial
+ *              gate — matching the stated intent that Finance acts like a
+ *              post-auditor, not a second approver of the transaction
+ *              itself.
+ */
+const completeLiquidation = async (req, res) => {
+  const userId = req.userId || req.user?.id || 1
+  const { id, remarks } = req.body
+
+  if (!id) return res.status(400).json({ message: 'Missing required field: id' })
+  if (!requireRole(req, res, ['FINANCE', 'ADMIN'])) return
+
+  try {
+    const lq = await getLiquidationById(id)
+    if (!lq) return res.status(404).json({ message: 'Liquidation not found' })
+    if (lq[Liquidation.Liquidation.cols.status] !== 'VERIFIED') {
+      return res.status(400).json({
+        message: `Cannot complete a liquidation with status ${lq[Liquidation.Liquidation.cols.status]}. Only VERIFIED liquidations can be completed.`,
+      })
+    }
+
+    const updateQuery = SQL.model(Liquidation.Liquidation)
+      .update({ [Liquidation.Liquidation.cols.status]: 'COMPLETED' })
+      .where(Liquidation.Liquidation.pk, id)
+      .build()
+    const activityQuery = SQL.model(Liquidation.Activity)
+      .insert({
+        [Liquidation.Activity.cols.liquidation_id]: id,
+        [Liquidation.Activity.cols.action]: 'RECEIVED',
+        [Liquidation.Activity.cols.remarks]:
+          remarks ||
+          'Post-audit complete — no further financial changes (already settled at verification).',
+        [Liquidation.Activity.cols.receipt]: '',
+        [Liquidation.Activity.cols.created_by]: userId,
+      })
+      .build()
+
+    await Transaction([toTxQuery(updateQuery), toTxQuery(activityQuery)])
+
+    return res.status(200).json({ message: 'Liquidation post-audit completed successfully' })
+  } catch (error) {
     console.error('Error in completeLiquidation:', error)
-    return res.status(500).json({ message: 'Error completing liquidation', error: error.message })
+    return res.status(500).json({ message: 'Error completing liquidation' })
   }
 }
 
 /**
  * @name markLiquidationIncomplete
  * @description Finance flags a VERIFIED liquidation for correction
- *              without treating it as a Team-Leader/Fund-Custodian
- *              rejection (§8). la_action has no INCOMPLETE value, so this
- *              reuses REJECTED with a distinguishing remarks prefix —
- *              same technique as rejectLiquidation's stage prefix. Does
- *              NOT touch Cash Disbursement/Revolving Fund — nothing was
- *              settled.
+ *              during post-audit, without treating it as a rejection.
+ *              la_action has no INCOMPLETE value, so this reuses REJECTED
+ *              with a distinguishing remarks prefix — same technique as
+ *              rejectLiquidation's stage prefix.
+ *
+ *              IMPORTANT: does NOT reverse the Cash Disbursement/Revolving
+ *              Fund settlement — that already happened at verifyLiquidation
+ *              and this function has no way to undo it (see
+ *              verifyLiquidation's docstring on the resubmit/re-verify
+ *              dead end this creates). Use this for flagging a
+ *              documentation/paperwork issue on an already-settled
+ *              liquidation, not for cases where the settled amounts
+ *              themselves need to change.
  */
 const markLiquidationIncomplete = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
@@ -730,11 +801,9 @@ const markLiquidationIncomplete = async (req, res) => {
     const lq = await getLiquidationById(id)
     if (!lq) return res.status(404).json({ message: 'Liquidation not found' })
     if (lq[Liquidation.Liquidation.cols.status] !== 'VERIFIED') {
-      return res
-        .status(400)
-        .json({
-          message: `Cannot mark incomplete a liquidation with status ${lq[Liquidation.Liquidation.cols.status]}. Only VERIFIED liquidations can be marked incomplete.`,
-        })
+      return res.status(400).json({
+        message: `Cannot mark incomplete a liquidation with status ${lq[Liquidation.Liquidation.cols.status]}. Only VERIFIED liquidations can be marked incomplete.`,
+      })
     }
 
     const updateQuery = SQL.model(Liquidation.Liquidation)
