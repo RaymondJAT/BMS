@@ -1,11 +1,29 @@
 const express = require('express')
-const { getLiquidationLiquidation, upsertLiquidationLiquidation } = require('../controllers/liquidation-liquidation.controller')
+const {
+  getLiquidation,
+  getLiquidationDetail,
+  getLiquidationActivity,
+  createLiquidation,
+  updateLiquidation,
+  approveLiquidation,
+  rejectLiquidation,
+  verifyLiquidation,
+  completeLiquidation,
+  markLiquidationIncomplete,
+} = require('../controllers/liquidation-liquidation.controller')
 
-const liquidationLiquidationRouter = express.Router()
+const liquidationRouter = express.Router()
 
-liquidationLiquidationRouter.get('/', getLiquidationLiquidation)
-liquidationLiquidationRouter.post('/', upsertLiquidationLiquidation)
+liquidationRouter.get('/', getLiquidation)
+liquidationRouter.get('/activity', getLiquidationActivity)
+liquidationRouter.get('/:id', getLiquidationDetail)
 
-module.exports = {
-  liquidationLiquidationRouter,
-}
+liquidationRouter.post('/', createLiquidation)
+liquidationRouter.put('/update', updateLiquidation)
+liquidationRouter.put('/approve', approveLiquidation)
+liquidationRouter.put('/reject', rejectLiquidation)
+liquidationRouter.put('/verify', verifyLiquidation)
+liquidationRouter.put('/complete', completeLiquidation)
+liquidationRouter.put('/incomplete', markLiquidationIncomplete)
+
+module.exports = { liquidationRouter }

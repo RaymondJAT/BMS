@@ -1,6 +1,7 @@
 const { Query, Transaction, SQLQueryBuilder } = require('../database/utilities/queries.util')
 const { Cash } = require('../database/models/Cash')
 const { Revolving } = require('../database/models/Revolving')
+const { hasOutstandingLiquidation } = require('./liquidation-liquidation.controller')
 const SQL = new SQLQueryBuilder()
 
 // ==========================================
@@ -225,6 +226,14 @@ const createCashRequest = async (req, res) => {
   const requestAmount = parseNum(amount)
   if (requestAmount <= 0) {
     return res.status(400).json({ message: 'amount must be greater than zero' })
+  }
+
+  const blocked = await hasOutstandingLiquidation(employee_id)
+  if (blocked) {
+    return res.status(400).json({
+      message:
+        'You cannot create a new Cash Request until your previous Cash Request has been fully liquidated.',
+    })
   }
 
   try {
@@ -784,28 +793,65 @@ const completeCashRequest = async (req, res) => {
 /**
  * @name getCashRequest
  * @description Get Cash Request records, optionally filtered by status or
- *              requesting employee.
+ *              requesting employee. Enriched with LEFT-JOINed Cash
+ *              Disbursement and Liquidation info so the frontend can
+ *              decide, without a second round-trip:
+ *                - disbursement_amount / cash_disbursement_id: what a
+ *                  COMPLETED request actually disbursed (needed to show
+ *                  "Cash Received" on the Liquidate flow).
+ *                - liquidation_id / liquidation_status: whether a
+ *                  Liquidation already exists for this request, and its
+ *                  current stage — drives the Liquidate button's
+ *                  visibility on the Cash Request page (§2/§18).
+ *              Stays raw SQL rather than the query builder for the same
+ *              reason getBudgetBudget does — aliased derived joins the
+ *              builder doesn't support.
  */
 const getCashRequest = async (req, res) => {
-  // #swagger.tags = ['Cash Request']
-  // #swagger.description = 'Get all Cash Request records'
-  /*
-    #swagger.parameters['status'] = { in: 'query', type: 'string', required: false, description: 'Filter by status (PENDING/APPROVED/COMPLETED/REJECTED)' }
-    #swagger.parameters['employee_id'] = { in: 'query', type: 'integer', required: false, description: 'Filter by requesting employee id' }
-  */
-
   const { status, employee_id } = req.query
 
   try {
-    let queryBuilder = SQL.model(Cash.Request).select(Cash.Request.select)
+    const conditions = []
+    const params = []
+    if (status) {
+      conditions.push('cr.cr_status = ?')
+      params.push(status)
+    }
+    if (employee_id) {
+      conditions.push('cr.cr_employee_id = ?')
+      params.push(employee_id)
+    }
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
-    if (status) queryBuilder = queryBuilder.where(Cash.Request.cols.status, status)
-    if (employee_id) queryBuilder = queryBuilder.where(Cash.Request.cols.employee_id, employee_id)
+    const rows = await Query(
+      `SELECT
+         cr.cr_id AS id,
+         cr.cr_reference_id AS reference_id,
+         cr.cr_cv_number AS cv_number,
+         cr.cr_purpose AS purpose,
+         cr.cr_project AS project,
+         cr.cr_amount AS amount,
+         cr.cr_revolving_fund_id AS revolving_fund_id,
+         cr.cr_employee_id AS employee_id,
+         cr.cr_department_id AS department_id,
+         cr.cr_team_lead AS team_lead,
+         cr.cr_request_date AS request_date,
+         cr.cr_status AS status,
+         cr.cr_createdAt AS createdAt,
+         cd.cd_id AS cash_disbursement_id,
+         cd.cd_amount_issued AS disbursement_amount,
+         cd.cd_status AS disbursement_status,
+         lq.l_id AS liquidation_id,
+         lq.l_status AS liquidation_status
+       FROM cash_request cr
+       LEFT JOIN cash_disbursement cd ON cd.cd_cash_request_id = cr.cr_id
+       LEFT JOIN liquidation lq ON lq.l_cash_request_id = cr.cr_id
+       ${whereClause}
+       ORDER BY cr.cr_id DESC`,
+      params,
+    )
 
-    const { sql, bindings } = queryBuilder.build()
-    const result = await Query(sql, bindings)
-
-    return res.status(200).json(result)
+    return res.status(200).json(rows)
   } catch (error) {
     console.error('Error in getCashRequest:', error)
     return res.status(500).json({ message: 'Error retrieving Cash Request records' })

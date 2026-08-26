@@ -9,10 +9,7 @@ import {
 } from 'lucide-react'
 
 export const NAVIGATION_ITEMS = [
-  // ==========================================
-  // 1. DASHBOARD
-  // Access: Requester, Team Leader, Custodian, Finance, Admin
-  // ==========================================
+  // DASHBOARD
   {
     id: 'dashboard',
     title: 'Dashboard',
@@ -20,11 +17,7 @@ export const NAVIGATION_ITEMS = [
     to: '/dashboard',
     icon: LayoutDashboard,
   },
-  // ==========================================
-  // 2. MASTER FILES
-  // Core setup, lookup tables, and RBAC permissions
-  // Access: Admin (Managed via permission setup for system setup)
-  // ==========================================
+  // MASTER FILES
   {
     id: 'master-files',
     title: 'Master Files',
@@ -42,11 +35,7 @@ export const NAVIGATION_ITEMS = [
       { id: 'master-particulars', title: 'Particulars & Expense Types', to: '/master/particulars' },
     ],
   },
-  // ==========================================
-  // 3. FUND MANAGEMENT
-  // Budget allocation and cash drawer tracking
-  // Access: Custodian, Finance, Admin
-  // ==========================================
+  // FUND MANAGEMENT
   {
     id: 'fund-management',
     title: 'Fund Management',
@@ -66,11 +55,7 @@ export const NAVIGATION_ITEMS = [
       { id: 'fund-history', title: 'Audit History', to: '/funds/history' },
     ],
   },
-  // ==========================================
-  // 4. FINANCE & CASH FLOW
-  // High-level financial sign-offs and liquidation approvals
-  // Access: Finance, Admin
-  // ==========================================
+  // FINANCE & CASH FLOW
   {
     id: 'finance',
     title: 'Finance & Cash Flow',
@@ -90,10 +75,7 @@ export const NAVIGATION_ITEMS = [
       { id: 'fin-all', title: 'All Cash Requests', to: '/finance/all' },
     ],
   },
-  // ==========================================
-  // 5. MY WORKBENCH
-  // Core personal workflow hub for end-users and immediate supervisors
-  // ==========================================
+  // MY WORKBENCH
   {
     id: 'my-workbench',
     title: 'My Workbench',
@@ -104,17 +86,13 @@ export const NAVIGATION_ITEMS = [
       { id: 'wb-cash-requests', title: 'Cash Requests', to: '/workbench/request' },
 
       // Access: Requester, Team Leader, Custodian, Finance, Admin
-      { id: 'wb-liquidations', title: 'Liquidations', to: '/workbench/liquidations' },
+      { id: 'wb-liquidations', title: 'Liquidations', to: '/workbench/liquidation' },
 
       // Access: Team Leader, Admin (First-level review/approval for direct reports)
       { id: 'wb-approvals', title: 'Approvals & Reviews', to: '/workbench/approvals' },
     ],
   },
-  // ==========================================
-  // 6. DISBURSEMENTS
-  // Payout processing and physical liquidation verification
-  // Access: Custodian, Finance, Admin
-  // ==========================================
+  // DISBURSEMENTS
   {
     id: 'disbursements',
     title: 'Disbursements',
@@ -135,11 +113,7 @@ export const NAVIGATION_ITEMS = [
       { id: 'disb-history', title: 'Disbursement History', to: '/disbursements/history' },
     ],
   },
-  // ==========================================
-  // 7. REPORTS & LOGS
-  // Analytical reports and logs
-  // Access: Team Leader, Custodian, Finance, Admin
-  // ==========================================
+  // REPORTS & LOGS
   {
     id: 'reports',
     title: 'Reports & Logs',

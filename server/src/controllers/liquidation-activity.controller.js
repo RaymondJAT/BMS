@@ -50,23 +50,26 @@ const upsertLiquidationActivity = async (req, res) => {
   //     description: 'Activity created_by'
   //   }
   */
-  
+
   // Destructure only the non-system keys from req.body
   const { id, liquidation_id, action, remarks, receipt, created_by } = req.body
-  
+
   let query
 
   try {
     if (id) {
       let updateData = {}
-      if (liquidation_id !== undefined) updateData[Liquidation.Activity.cols.liquidation_id] = liquidation_id
+      if (liquidation_id !== undefined)
+        updateData[Liquidation.Activity.cols.liquidation_id] = liquidation_id
       if (action !== undefined) updateData[Liquidation.Activity.cols.action] = action
       if (remarks !== undefined) updateData[Liquidation.Activity.cols.remarks] = remarks
       if (receipt !== undefined) updateData[Liquidation.Activity.cols.receipt] = receipt
       if (created_by !== undefined) updateData[Liquidation.Activity.cols.created_by] = created_by
 
-      if (Liquidation.Activity.cols.updatedAt) updateData[Liquidation.Activity.cols.updatedAt] = new Date()
-      if (Liquidation.Activity.cols.updatedBy) updateData[Liquidation.Activity.cols.updatedBy] = userId
+      if (Liquidation.Activity.cols.updatedAt)
+        updateData[Liquidation.Activity.cols.updatedAt] = new Date()
+      if (Liquidation.Activity.cols.updatedBy)
+        updateData[Liquidation.Activity.cols.updatedBy] = userId
 
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ message: 'No data to update' })
@@ -89,8 +92,12 @@ const upsertLiquidationActivity = async (req, res) => {
           [Liquidation.Activity.cols.remarks]: remarks,
           [Liquidation.Activity.cols.receipt]: receipt,
           [Liquidation.Activity.cols.created_by]: created_by,
-          ...( Liquidation.Activity.cols.createdBy ? { [Liquidation.Activity.cols.createdBy]: userId } : {} ),
-          ...( Liquidation.Activity.cols.createdAt ? { [Liquidation.Activity.cols.createdAt]: new Date() } : {} ),
+          ...(Liquidation.Activity.cols.createdBy
+            ? { [Liquidation.Activity.cols.createdBy]: userId }
+            : {}),
+          ...(Liquidation.Activity.cols.createdAt
+            ? { [Liquidation.Activity.cols.createdAt]: new Date() }
+            : {}),
         })
         .build()
     }
@@ -127,7 +134,7 @@ const getLiquidationActivity = async (req, res) => {
         Liquidation.Activity.cols.remarks,
         Liquidation.Activity.cols.receipt,
         Liquidation.Activity.cols.created_by,
-        Liquidation.Activity.cols.createdAt
+        Liquidation.Activity.cols.createdAt,
       ])
       // .where(Liquidation.Activity.cols.companyId, companyId) // Uncomment if company-scoped
       .build()
@@ -143,5 +150,5 @@ const getLiquidationActivity = async (req, res) => {
 
 module.exports = {
   getLiquidationActivity,
-  upsertLiquidationActivity
+  upsertLiquidationActivity,
 }

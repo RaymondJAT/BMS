@@ -1,4 +1,14 @@
-import { Eye, Pencil, CheckCircle2, Banknote, User, Building, Calendar, Folder } from 'lucide-react'
+import {
+  Eye,
+  Pencil,
+  CheckCircle2,
+  Banknote,
+  Receipt,
+  User,
+  Building,
+  Calendar,
+  Folder,
+} from 'lucide-react'
 
 const formatCurrency = (val) =>
   `₱${parseFloat(val || 0).toLocaleString('en-PH', {
@@ -50,6 +60,8 @@ export function createRequestColumns({
   onEdit,
   onApprove,
   onComplete,
+  onLiquidate,
+  onViewLiquidation,
   getEmployeeName,
   getDepartmentName,
   getFundLabel,
@@ -200,14 +212,15 @@ export function createRequestColumns({
       align: 'center',
       cell: (row) => {
         const status = String(row.status || '').toUpperCase()
-
-        // Under full access (no role yet, or Administrator), ownership
-        // doesn't gate anything — you can edit any row to test the flow.
-        // With a real REQUESTER role, it's still locked to rows you own.
         const ownsRequest =
           hasFullAccess ||
           (canActAsRequester && String(row.employee_id) === String(currentEmployeeId))
         const canEdit = ownsRequest && EDITABLE_STATUSES.includes(status)
+        // Liquidate only once COMPLETED and no liquidation exists yet for
+        // this request (row.liquidation_id comes from getCashRequest's
+        // LEFT JOIN — see backend patch).
+        const canLiquidate = ownsRequest && status === 'COMPLETED' && !row.liquidation_id
+        const hasLiquidation = Boolean(row.liquidation_id)
 
         return (
           <div className="flex items-center justify-center gap-1">
@@ -259,6 +272,32 @@ export function createRequestColumns({
                 className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
               >
                 <Banknote className="w-4 h-4" />
+              </button>
+            )}
+            {canLiquidate && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onLiquidate?.(row)
+                }}
+                title="Liquidate this Cash Request"
+                className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+              >
+                <Receipt className="w-4 h-4" />
+              </button>
+            )}
+            {hasLiquidation && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onViewLiquidation?.(row)
+                }}
+                title={`View Liquidation (${row.liquidation_status})`}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
+                <Receipt className="w-4 h-4" />
               </button>
             )}
           </div>

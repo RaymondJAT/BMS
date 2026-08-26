@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import DataTable from '../../../components/ui/DataTable'
 import StatCard from '../../../components/ui/StatCard'
 import {
@@ -14,16 +14,17 @@ import {
   Loader2,
   FileText,
 } from 'lucide-react'
-
 import { createRequestColumns } from '../../../config/tables/requestColumns'
-
 import CreateCashRequestModal from '../../../components/dashboard/request/CreateCashRequestModal'
 import ViewCashRequestModal from '../../../components/dashboard/request/ViewCashRequestModal'
 import ApproveCashRequestModal from '../../../components/dashboard/request/ApproveCashRequestModal'
 import DisburseCashRequestModal from '../../../components/dashboard/request/DisburseCashRequestModal'
-
 import useCashRequests from '../../../hooks/useCashRequests'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
+import CreateLiquidationModal from '../../../components/dashboard/liquidation/CreateLiquidationModal'
+import ViewLiquidationModal from '../../../components/dashboard/liquidation/ViewLiquidationModal'
+import useLiquidationMasterData from '../../../hooks/useLiquidationMasterData'
+import { liquidationApi, cashRequestEligibilityApi } from '../../../api/liquidationApi'
 
 export const Route = createFileRoute('/_authenticated/workbench/request')({
   component: CashRequestPage,
@@ -37,13 +38,6 @@ const formatCurrency = (val) =>
   }).format(val || 0)
 
 function CashRequestPage() {
-  // TODO: replace with the real authenticated user's role + employee id
-  // once auth is wired up. Leaving userRole as 'ADMINISTRATOR' (or unset)
-  // gives full access in requestColumns.js — see hasFullAccess there —
-  // so every action, including Edit on requests you don't "own", is
-  // visible for testing before RBAC exists. currentEmployeeId is unused
-  // under full access; wire it to the real logged-in employee id once
-  // ownership actually needs to be enforced.
   const userRole = 'ADMINISTRATOR'
   const currentEmployeeId = null
 
@@ -75,10 +69,71 @@ function CashRequestPage() {
     disburseRequest,
   } = useCashRequests({ role: userRole })
 
+  const { districts, modes } = useLiquidationMasterData()
+
+  const [eligibility, setEligibility] = useState({ eligible: true, message: null })
+  useEffect(() => {
+    if (!currentEmployeeId) return
+    cashRequestEligibilityApi
+      .check(currentEmployeeId)
+      .then(setEligibility)
+      .catch(() => {})
+  }, [currentEmployeeId, requests])
+
+  const [liquidateTarget, setLiquidateTarget] = useState(null)
+  const [isLiquidateOpen, setIsLiquidateOpen] = useState(false)
+  const [isLiquidating, setIsLiquidating] = useState(false)
+  const [viewLiquidationRow, setViewLiquidationRow] = useState(null)
+  const [viewLiquidationDetail, setViewLiquidationDetail] = useState(null)
+  const [viewLiquidationActivity, setViewLiquidationActivity] = useState(null)
+
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [editingRequest, setEditingRequest] = useState(null)
   const [selectedRequest, setSelectedRequest] = useState(null)
-  const [activeModal, setActiveModal] = useState(null) // 'view' | 'approve' | 'disburse'
+  const [activeModal, setActiveModal] = useState(null)
+
+  const handleLiquidate = useCallback((row) => {
+    setLiquidateTarget(row)
+    setIsLiquidateOpen(true)
+  }, [])
+
+  const handleCloseLiquidate = useCallback(() => {
+    setIsLiquidateOpen(false)
+    setLiquidateTarget(null)
+  }, [])
+
+  const handleCreateLiquidation = useCallback(
+    async (payload) => {
+      setIsLiquidating(true)
+      try {
+        await liquidationApi.create(payload)
+        await fetchCashRequests()
+        return { success: true }
+      } catch (err) {
+        return {
+          success: false,
+          message: err.response?.data?.message || 'Failed to submit liquidation.',
+        }
+      } finally {
+        setIsLiquidating(false)
+      }
+    },
+    [fetchCashRequests],
+  )
+
+  const handleViewLiquidation = useCallback(async (row) => {
+    setViewLiquidationRow(row)
+    const detail = await liquidationApi.getById(row.liquidation_id)
+    const acts = await liquidationApi.getActivity({ liquidation_id: row.liquidation_id })
+    setViewLiquidationDetail(detail)
+    setViewLiquidationActivity(acts)
+  }, [])
+
+  const handleCloseViewLiquidation = useCallback(() => {
+    setViewLiquidationRow(null)
+    setViewLiquidationDetail(null)
+    setViewLiquidationActivity(null)
+  }, [])
 
   const handleView = useCallback((row) => {
     setSelectedRequest(row)
@@ -141,6 +196,8 @@ function CashRequestPage() {
         onEdit: handleEdit,
         onApprove: handleApproveAction,
         onComplete: handleDisburseAction,
+        onLiquidate: handleLiquidate,
+        onViewLiquidation: handleViewLiquidation,
         getEmployeeName,
         getDepartmentName,
         getFundLabel,
@@ -152,6 +209,8 @@ function CashRequestPage() {
       handleEdit,
       handleApproveAction,
       handleDisburseAction,
+      handleLiquidate,
+      handleViewLiquidation,
       getEmployeeName,
       getDepartmentName,
       getFundLabel,
@@ -172,26 +231,33 @@ function CashRequestPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-lg transition-all shadow-2xs cursor-pointer"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-            Export
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setEditingRequest(null)
-              setIsCreateOpen(true)
-            }}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#E31837] hover:bg-[#c4122e] text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            New Cash Request
-          </button>
+        <div className="flex flex-col items-end gap-1.5">
+          {!eligibility.eligible && (
+            <div className="w-full sm:w-auto p-2 bg-amber-50 border border-amber-200 text-amber-800 text-[11px] rounded-lg font-medium max-w-xs text-right">
+              {eligibility.message}
+            </div>
+          )}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-lg transition-all shadow-2xs cursor-pointer"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+              Export
+            </button>
+            <button
+              type="button"
+              disabled={!eligibility.eligible}
+              onClick={() => {
+                setEditingRequest(null)
+                setIsCreateOpen(true)
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#E31837] hover:bg-[#c4122e] text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              New Cash Request
+            </button>
+          </div>
         </div>
       </div>
 
@@ -361,6 +427,30 @@ function CashRequestPage() {
           isSubmitting={isMutating}
           getFundLabel={getFundLabel}
           getDepartmentName={getDepartmentName}
+          getEmployeeName={getEmployeeName}
+        />
+      )}
+
+      {isLiquidateOpen && liquidateTarget && (
+        <CreateLiquidationModal
+          isOpen={isLiquidateOpen}
+          onClose={handleCloseLiquidate}
+          onCreate={handleCreateLiquidation}
+          isSubmitting={isLiquidating}
+          cashRequest={liquidateTarget}
+          cashReceived={liquidateTarget.disbursement_amount}
+          districts={districts}
+          particulars={particulars}
+          modes={modes}
+        />
+      )}
+
+      {viewLiquidationRow && viewLiquidationDetail && (
+        <ViewLiquidationModal
+          isOpen
+          onClose={handleCloseViewLiquidation}
+          liquidation={viewLiquidationDetail}
+          activity={viewLiquidationActivity || []}
           getEmployeeName={getEmployeeName}
         />
       )}

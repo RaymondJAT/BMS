@@ -74,23 +74,36 @@ const upsertLiquidationItem = async (req, res) => {
   //     description: 'Item amount'
   //   }
   */
-  
+
   // Destructure only the non-system keys from req.body
-  const { id, liquidation_id, date, rt, store_name, particulars, from, to, mode_of_transportation_id, amount } = req.body
-  
+  const {
+    id,
+    liquidation_id,
+    date,
+    rt,
+    store_name,
+    particulars,
+    from,
+    to,
+    mode_of_transportation_id,
+    amount,
+  } = req.body
+
   let query
 
   try {
     if (id) {
       let updateData = {}
-      if (liquidation_id !== undefined) updateData[Liquidation.Item.cols.liquidation_id] = liquidation_id
+      if (liquidation_id !== undefined)
+        updateData[Liquidation.Item.cols.liquidation_id] = liquidation_id
       if (date !== undefined) updateData[Liquidation.Item.cols.date] = date
       if (rt !== undefined) updateData[Liquidation.Item.cols.rt] = rt
       if (store_name !== undefined) updateData[Liquidation.Item.cols.store_name] = store_name
       if (particulars !== undefined) updateData[Liquidation.Item.cols.particulars] = particulars
       if (from !== undefined) updateData[Liquidation.Item.cols.from] = from
       if (to !== undefined) updateData[Liquidation.Item.cols.to] = to
-      if (mode_of_transportation_id !== undefined) updateData[Liquidation.Item.cols.mode_of_transportation_id] = mode_of_transportation_id
+      if (mode_of_transportation_id !== undefined)
+        updateData[Liquidation.Item.cols.mode_of_transportation_id] = mode_of_transportation_id
       if (amount !== undefined) updateData[Liquidation.Item.cols.amount] = amount
 
       if (Liquidation.Item.cols.updatedAt) updateData[Liquidation.Item.cols.updatedAt] = new Date()
@@ -121,8 +134,10 @@ const upsertLiquidationItem = async (req, res) => {
           [Liquidation.Item.cols.to]: to,
           [Liquidation.Item.cols.mode_of_transportation_id]: mode_of_transportation_id,
           [Liquidation.Item.cols.amount]: amount,
-          ...( Liquidation.Item.cols.createdBy ? { [Liquidation.Item.cols.createdBy]: userId } : {} ),
-          ...( Liquidation.Item.cols.createdAt ? { [Liquidation.Item.cols.createdAt]: new Date() } : {} ),
+          ...(Liquidation.Item.cols.createdBy ? { [Liquidation.Item.cols.createdBy]: userId } : {}),
+          ...(Liquidation.Item.cols.createdAt
+            ? { [Liquidation.Item.cols.createdAt]: new Date() }
+            : {}),
         })
         .build()
     }
@@ -162,7 +177,7 @@ const getLiquidationItem = async (req, res) => {
         Liquidation.Item.cols.from,
         Liquidation.Item.cols.to,
         Liquidation.Item.cols.mode_of_transportation_id,
-        Liquidation.Item.cols.amount
+        Liquidation.Item.cols.amount,
       ])
       // .where(Liquidation.Item.cols.companyId, companyId) // Uncomment if company-scoped
       .build()
@@ -178,5 +193,5 @@ const getLiquidationItem = async (req, res) => {
 
 module.exports = {
   getLiquidationItem,
-  upsertLiquidationItem
+  upsertLiquidationItem,
 }
