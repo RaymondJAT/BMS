@@ -29,7 +29,7 @@ module.exports = {
         type: Sequelize.TEXT('long'),
         allowNull: false,
       },
-      cda_particulars: {
+      cda_purpose: {
         type: Sequelize.STRING(300),
         allowNull: false,
       },

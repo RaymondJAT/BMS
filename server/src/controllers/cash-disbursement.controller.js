@@ -67,37 +67,6 @@ const getRevolvingFundById = async (id) => {
 }
 
 /**
- * Needed so editCashDisbursementAmount can determine whether the
- * disbursement's revolving fund is itself linked to a Budget, and if so,
- * pull that budget's CURRENT amount server-side to apply the difference
- * against — never trusting a client-supplied budget total.
- */
-const getBudgetById = async (id) => {
-  const { sql, bindings } = SQL.model(Budget.Budget)
-    .select(Budget.Budget.select)
-    .where(Budget.Budget.pk, id)
-    .build()
-  const [row] = await Query(sql, bindings)
-  return wrapRow(row, Budget.Budget)
-}
-
-/**
- * cash_disbursement_activity.cda_particulars is a free-text STRING(300)
- * column with no FK — unlike cash_disbursement.cd_particulars, which is an
- * FK integer to master_particulars.mpt_id. Every activity-log call site
- * only has the id on hand, so this resolves it to master_particulars.mpt_name
- * before insert. mpt_status (ACTIVE/INACTIVE/DELETED) is intentionally not
- * filtered on here — an activity log should keep the historical label even
- * if the particulars entry is later deactivated or soft-deleted.
- */
-const getParticularsNameById = async (particularsId) => {
-  const rows = await Query(`SELECT mpt_name FROM master_particulars WHERE mpt_id = ?`, [
-    particularsId,
-  ])
-  return rows[0]?.mpt_name || null
-}
-
-/**
  * Recomputes a cash_disbursement row's outstanding amount and status
  * from its issued/returned/expended totals.
  */
@@ -223,13 +192,15 @@ const resolveClosedFundStatus = async (
  */
 const NON_ISSUABLE_RF_STATUSES = ['CLOSED', 'CLEARED', 'RETURN']
 
-const buildCdActivityInsert = (cashDisbursementId, amount, remarks, particulars) => {
+/** Inserts a cash_disbursement_activity row. `purpose` is free text —
+ * copied straight from the disbursement's own cd_purpose, no lookup. */
+const buildCdActivityInsert = (cashDisbursementId, amount, remarks, purpose) => {
   const query = SQL.model(Cash.DisbursementActivity)
     .insert({
       [Cash.DisbursementActivity.cols.cash_disbursement_id]: cashDisbursementId,
       [Cash.DisbursementActivity.cols.amount]: amount,
       [Cash.DisbursementActivity.cols.remarks]: remarks,
-      [Cash.DisbursementActivity.cols.particulars]: particulars,
+      [Cash.DisbursementActivity.cols.purpose]: purpose,
     })
     .build()
   return toTxQuery(query)
@@ -262,42 +233,6 @@ const buildCdUpdate = (cashDisbursementId, updateData) => {
   return toTxQuery(query)
 }
 
-/**
- * Builds the budget update + budget_history insert as Transaction-ready
- * query objects, WITHOUT executing them. Duplicated from
- * revolvingFundController.js's buildBudgetChangeQueries rather than
- * shared — matches this codebase's existing per-controller pattern (see
- * that file's own copy of this same helper).
- *
- * @param {object} budgetRow - row previously fetched via getBudgetById
- * @param {number} delta - positive credits the budget, negative debits it.
- */
-const buildBudgetChangeQueries = (budgetRow, delta, departmentId, userId, remarks) => {
-  const previousAmount = parseNum(budgetRow[Budget.Budget.cols.amount])
-  const newAmount = previousAmount + delta
-
-  const updateQuery = SQL.model(Budget.Budget)
-    .update({ [Budget.Budget.cols.amount]: newAmount })
-    .where(Budget.Budget.pk, budgetRow[Budget.Budget.cols.id])
-    .build()
-
-  const historyQuery = SQL.model(Budget.History)
-    .insert({
-      [Budget.History.cols.budget_id]: budgetRow[Budget.Budget.cols.id],
-      [Budget.History.cols.amount]: Math.abs(delta),
-      [Budget.History.cols.previous_amount]: previousAmount,
-      [Budget.History.cols.new_amount]: newAmount,
-      [Budget.History.cols.remarks]: remarks || null,
-      [Budget.History.cols.department_id]: departmentId,
-      [Budget.History.cols.type]: budgetRow[Budget.Budget.cols.type],
-      [Budget.History.cols.date]: new Date(),
-      [Budget.History.cols.created_by]: userId,
-    })
-    .build()
-
-  return [toTxQuery(updateQuery), toTxQuery(historyQuery)]
-}
-
 // ==========================================
 // METADATA-ONLY UPSERT
 // ==========================================
@@ -305,12 +240,13 @@ const buildBudgetChangeQueries = (budgetRow, delta, departmentId, userId, remark
 /**
  * @name upsertCashDisbursement
  * @description Create or update a cash disbursement's METADATA only
- *              (received_by, revolving_fund_id, department_id, particulars, cash_voucher).
- *              Amount and status fields are intentionally not editable here —
- *              use editCashDisbursementAmount / issueCashDisbursement /
- *              returnCashDisbursement / recordExpendedCashDisbursement /
- *              reimburseCashDisbursement instead, so cash_disbursement never
- *              drifts out of sync with revolving_fund/budget.
+ *              (received_by, revolving_fund_id, department_id, purpose,
+ *              cash_voucher). Amount and status fields are intentionally
+ *              not editable here — use editCashDisbursementAmount /
+ *              issueCashDisbursement / returnCashDisbursement /
+ *              recordExpendedCashDisbursement / reimburseCashDisbursement
+ *              instead, so cash_disbursement never drifts out of sync
+ *              with revolving_fund/budget.
  */
 const upsertCashDisbursement = async (req, res) => {
   // #swagger.tags = ['Cash Disbursement']
@@ -336,11 +272,11 @@ const upsertCashDisbursement = async (req, res) => {
       required: false,
       description: 'Department id (master_department.md_id)'
     }
-    #swagger.parameters['particulars'] = {
+    #swagger.parameters['purpose'] = {
       in: 'formData',
-      type: 'integer',
+      type: 'string',
       required: false,
-      description: 'Particulars id (master_particulars.mpt_id)'
+      description: 'Free-text purpose for this disbursement'
     }
     #swagger.parameters['cash_voucher'] = {
       in: 'formData',
@@ -350,7 +286,7 @@ const upsertCashDisbursement = async (req, res) => {
     }
   */
 
-  const { id, received_by, department_id, particulars, cash_voucher } = req.body
+  const { id, received_by, department_id, purpose, cash_voucher } = req.body
 
   if (!id) {
     return res.status(400).json({
@@ -364,7 +300,7 @@ const upsertCashDisbursement = async (req, res) => {
     if (received_by !== undefined) updateData[Cash.Disbursement.cols.received_by] = received_by
     if (department_id !== undefined)
       updateData[Cash.Disbursement.cols.department_id] = department_id
-    if (particulars !== undefined) updateData[Cash.Disbursement.cols.particulars] = particulars
+    if (purpose !== undefined) updateData[Cash.Disbursement.cols.purpose] = purpose
     if (cash_voucher !== undefined) updateData[Cash.Disbursement.cols.cash_voucher] = cash_voucher
 
     if (Object.keys(updateData).length === 0) {
@@ -402,17 +338,13 @@ const upsertCashDisbursement = async (req, res) => {
  *              new amount as a fresh transaction.
  *
  *              Does NOT touch the connected Budget, same as every other
- *              action in this file (issue/return/expend/reimburse). This
- *              was a real bug in an earlier version of this function: an
+ *              action in this file (issue/return/expend/reimburse). An
  *              amount edit only moves money WITHIN the fund it's already
  *              deployed into — an increase pulls from the fund's own
  *              balance into its outstanding (both change by exactly
  *              `difference`, in opposite directions, so the fund's total
  *              balance+outstanding footprint against its Budget is
- *              UNCHANGED). No new money crosses the Budget boundary, so
- *              there's nothing for the Budget to account for — exactly
- *              like issueCashDisbursement, which also never touches
- *              budget for the same reason.
+ *              UNCHANGED). No new money crosses the Budget boundary.
  *
  *              Lifecycle: only disbursements that are NOT already
  *              LIQUIDATED can have their amount edited (mirrors the
@@ -530,8 +462,6 @@ const editCashDisbursementAmount = async (req, res) => {
 
     const didAutoClear = rfStatus === 'CLOSED' && newRfStatus === 'CLEARED'
 
-    const particularsName = await getParticularsNameById(cd[Cash.Disbursement.cols.particulars])
-
     const queries = [
       buildCdUpdate(id, {
         [Cash.Disbursement.cols.amount_issued]: newAmount,
@@ -542,7 +472,7 @@ const editCashDisbursementAmount = async (req, res) => {
         id,
         Math.abs(difference),
         `Amount edited: ₱${oldAmount.toFixed(2)} → ₱${newAmount.toFixed(2)} (${difference > 0 ? '+' : ''}₱${difference.toFixed(2)})`,
-        particularsName,
+        cd[Cash.Disbursement.cols.purpose],
       ),
       buildRfUpdate(fundId, {
         [Revolving.Fund.cols.issued]: newRfIssued,
@@ -603,7 +533,7 @@ const issueCashDisbursement = async (req, res) => {
     #swagger.parameters['revolving_fund_id'] = { in: 'formData', type: 'integer', required: true, description: 'Revolving Fund id to issue from' }
     #swagger.parameters['received_by'] = { in: 'formData', type: 'integer', required: true, description: 'Employee id (master_employee.me_id)' }
     #swagger.parameters['department_id'] = { in: 'formData', type: 'integer', required: true, description: 'Department id (master_department.md_id)' }
-    #swagger.parameters['particulars'] = { in: 'formData', type: 'integer', required: true, description: 'Particulars id (master_particulars.mpt_id)' }
+    #swagger.parameters['purpose'] = { in: 'formData', type: 'string', required: true, description: 'Free-text purpose for this disbursement' }
     #swagger.parameters['amount_issued'] = { in: 'formData', type: 'number', required: true, description: 'Amount to issue' }
     #swagger.parameters['cash_voucher'] = { in: 'formData', type: 'string', required: true, description: 'Cash voucher number' }
     #swagger.parameters['date_issued'] = { in: 'formData', type: 'string', required: false, description: 'Issue date, defaults to now' }
@@ -617,16 +547,16 @@ const issueCashDisbursement = async (req, res) => {
     revolving_fund_id,
     received_by,
     department_id,
-    particulars,
+    purpose,
     amount_issued,
     cash_voucher,
     date_issued,
   } = req.body
 
-  if (!revolving_fund_id || !received_by || !department_id || !particulars || !cash_voucher) {
+  if (!revolving_fund_id || !received_by || !department_id || !purpose || !cash_voucher) {
     return res.status(400).json({
       message:
-        'Missing required fields: revolving_fund_id, received_by, department_id, particulars, cash_voucher',
+        'Missing required fields: revolving_fund_id, received_by, department_id, purpose, cash_voucher',
     })
   }
 
@@ -671,7 +601,7 @@ const issueCashDisbursement = async (req, res) => {
         [Cash.Disbursement.cols.received_by]: received_by,
         [Cash.Disbursement.cols.revolving_fund_id]: revolving_fund_id,
         [Cash.Disbursement.cols.department_id]: department_id,
-        [Cash.Disbursement.cols.particulars]: particulars,
+        [Cash.Disbursement.cols.purpose]: purpose,
         [Cash.Disbursement.cols.amount_issued]: issueAmount,
         [Cash.Disbursement.cols.cash_voucher]: cash_voucher,
         [Cash.Disbursement.cols.amount_returned]: 0,
@@ -692,14 +622,12 @@ const issueCashDisbursement = async (req, res) => {
       const newRfBalance = currentBalance - issueAmount
       const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfIssued > 0)
 
-      const particularsName = await getParticularsNameById(particulars)
-
       const queries = [
         buildCdActivityInsert(
           newCdId,
           issueAmount,
           `Issued amount: ₱${issueAmount.toFixed(2)}`,
-          particularsName,
+          purpose,
         ),
         buildRfUpdate(revolving_fund_id, {
           [Revolving.Fund.cols.issued]: newRfIssued,
@@ -851,8 +779,6 @@ const returnCashDisbursement = async (req, res) => {
       currentExpended,
     )
 
-    const particularsName = await getParticularsNameById(cd[Cash.Disbursement.cols.particulars])
-
     const queries = [
       buildCdUpdate(id, {
         [Cash.Disbursement.cols.amount_returned]: newReturned,
@@ -863,7 +789,7 @@ const returnCashDisbursement = async (req, res) => {
         id,
         returnAmount,
         `Returned amount: ₱${returnAmount.toFixed(2)}`,
-        particularsName,
+        cd[Cash.Disbursement.cols.purpose],
       ),
     ]
 
@@ -989,8 +915,7 @@ const returnCashDisbursement = async (req, res) => {
  * @description Record spending against previously issued cash. Cascades:
  *              revolving_fund (amount_expended↑, liquidated↑). Does NOT
  *              touch budget — the budget was already debited at fund
- *              funding/top-up time; re-debiting here would double-count
- *              (this was a real bug in BMS v1's updatecash_disbursement_cv_new).
+ *              funding/top-up time; re-debiting here would double-count.
  *
  *              Always posts against the disbursement's OWN fund (there is
  *              no revolving_fund_id override here, unlike return/reimburse)
@@ -1054,8 +979,6 @@ const recordExpendedCashDisbursement = async (req, res) => {
     // amount_expended must always be allowed against the disbursement's
     // own fund, CLOSED or not.
 
-    // TODO(transaction): wrap in Transaction() — see note in issueCashDisbursement.
-
     const newExpended = currentExpended + expendedAmount
     const { outstanding: newOutstanding, status: newCdStatus } = computeCdStatus(
       currentIssued,
@@ -1090,8 +1013,6 @@ const recordExpendedCashDisbursement = async (req, res) => {
 
     const didAutoClear = rfStatus === 'CLOSED' && newRfStatus === 'CLEARED'
 
-    const particularsName = await getParticularsNameById(cd[Cash.Disbursement.cols.particulars])
-
     const queries = [
       buildCdUpdate(id, {
         [Cash.Disbursement.cols.amount_expended]: newExpended,
@@ -1102,7 +1023,7 @@ const recordExpendedCashDisbursement = async (req, res) => {
         id,
         expendedAmount,
         `Expended amount: ₱${expendedAmount.toFixed(2)}`,
-        particularsName,
+        cd[Cash.Disbursement.cols.purpose],
       ),
       buildRfUpdate(rf[Revolving.Fund.cols.id], {
         [Revolving.Fund.cols.amount_expended]: newRfExpended,
@@ -1158,26 +1079,20 @@ const reimburseCashDisbursement = async (req, res) => {
     #swagger.parameters['revolving_fund_id'] = { in: 'formData', type: 'integer', required: true, description: 'Revolving Fund id to reimburse from' }
     #swagger.parameters['received_by'] = { in: 'formData', type: 'integer', required: true, description: 'Employee id (master_employee.me_id)' }
     #swagger.parameters['department_id'] = { in: 'formData', type: 'integer', required: true, description: 'Department id (master_department.md_id)' }
-    #swagger.parameters['particulars'] = { in: 'formData', type: 'integer', required: true, description: 'Particulars id (master_particulars.mpt_id)' }
+    #swagger.parameters['purpose'] = { in: 'formData', type: 'string', required: true, description: 'Free-text purpose for this disbursement' }
     #swagger.parameters['amount_reimburse'] = { in: 'formData', type: 'number', required: true, description: 'Amount to reimburse' }
     #swagger.parameters['cash_voucher'] = { in: 'formData', type: 'string', required: true, description: 'Cash voucher number' }
   */
 
   const userId = req.userId || req.user?.id || 1
 
-  const {
-    revolving_fund_id,
-    received_by,
-    department_id,
-    particulars,
-    amount_reimburse,
-    cash_voucher,
-  } = req.body
+  const { revolving_fund_id, received_by, department_id, purpose, amount_reimburse, cash_voucher } =
+    req.body
 
-  if (!revolving_fund_id || !received_by || !department_id || !particulars || !cash_voucher) {
+  if (!revolving_fund_id || !received_by || !department_id || !purpose || !cash_voucher) {
     return res.status(400).json({
       message:
-        'Missing required fields: revolving_fund_id, received_by, department_id, particulars, cash_voucher',
+        'Missing required fields: revolving_fund_id, received_by, department_id, purpose, cash_voucher',
     })
   }
 
@@ -1219,7 +1134,7 @@ const reimburseCashDisbursement = async (req, res) => {
         [Cash.Disbursement.cols.received_by]: received_by,
         [Cash.Disbursement.cols.revolving_fund_id]: revolving_fund_id,
         [Cash.Disbursement.cols.department_id]: department_id,
-        [Cash.Disbursement.cols.particulars]: particulars,
+        [Cash.Disbursement.cols.purpose]: purpose,
         [Cash.Disbursement.cols.amount_issued]: reimburseAmount,
         [Cash.Disbursement.cols.cash_voucher]: cash_voucher,
         [Cash.Disbursement.cols.amount_returned]: 0,
@@ -1240,14 +1155,12 @@ const reimburseCashDisbursement = async (req, res) => {
       const newRfBalance = currentBalance - reimburseAmount
       const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], newRfIssued > 0)
 
-      const particularsName = await getParticularsNameById(particulars)
-
       const queries = [
         buildCdActivityInsert(
           newCdId,
           reimburseAmount,
           `Reimbursed amount: ₱${reimburseAmount.toFixed(2)}`,
-          particularsName,
+          purpose,
         ),
         buildRfUpdate(revolving_fund_id, {
           [Revolving.Fund.cols.issued]: newRfIssued,
@@ -1469,10 +1382,10 @@ const upsertCashDisbursementActivity = async (req, res) => {
     #swagger.parameters['cash_disbursement_id'] = { in: 'formData', type: 'string', required: false, description: 'DisbursementActivity cash_disbursement_id' }
     #swagger.parameters['amount'] = { in: 'formData', type: 'number', required: false, description: 'DisbursementActivity amount' }
     #swagger.parameters['remarks'] = { in: 'formData', type: 'string', required: false, description: 'DisbursementActivity remarks' }
-    #swagger.parameters['particulars'] = { in: 'formData', type: 'string', required: false, description: 'DisbursementActivity particulars' }
+    #swagger.parameters['purpose'] = { in: 'formData', type: 'string', required: false, description: 'DisbursementActivity purpose' }
   */
 
-  const { id, cash_disbursement_id, amount, remarks, particulars } = req.body
+  const { id, cash_disbursement_id, amount, remarks, purpose } = req.body
 
   let query
 
@@ -1483,8 +1396,7 @@ const upsertCashDisbursementActivity = async (req, res) => {
         updateData[Cash.DisbursementActivity.cols.cash_disbursement_id] = cash_disbursement_id
       if (amount !== undefined) updateData[Cash.DisbursementActivity.cols.amount] = amount
       if (remarks !== undefined) updateData[Cash.DisbursementActivity.cols.remarks] = remarks
-      if (particulars !== undefined)
-        updateData[Cash.DisbursementActivity.cols.particulars] = particulars
+      if (purpose !== undefined) updateData[Cash.DisbursementActivity.cols.purpose] = purpose
 
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ message: 'No data to update' })
@@ -1495,7 +1407,7 @@ const upsertCashDisbursementActivity = async (req, res) => {
         .where(Cash.DisbursementActivity.pk, id)
         .build()
     } else {
-      if (!cash_disbursement_id || amount === undefined || !remarks || !particulars) {
+      if (!cash_disbursement_id || amount === undefined || !remarks || !purpose) {
         return res.status(400).json({ message: 'Missing required fields' })
       }
 
@@ -1504,7 +1416,7 @@ const upsertCashDisbursementActivity = async (req, res) => {
           [Cash.DisbursementActivity.cols.cash_disbursement_id]: cash_disbursement_id,
           [Cash.DisbursementActivity.cols.amount]: amount,
           [Cash.DisbursementActivity.cols.remarks]: remarks,
-          [Cash.DisbursementActivity.cols.particulars]: particulars,
+          [Cash.DisbursementActivity.cols.purpose]: purpose,
         })
         .build()
     }

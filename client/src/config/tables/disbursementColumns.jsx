@@ -5,7 +5,6 @@ export function createDisbursementColumns({
   onSubmit,
   getEmployeeName,
   getDepartmentName,
-  getParticularsName,
   allDisbursements = [],
 }) {
   // A reimbursement is a separate cash_disbursement row sharing the same
@@ -51,10 +50,10 @@ export function createDisbursementColumns({
     },
     {
       header: 'Purpose',
-      accessorKey: 'particulars',
+      accessorKey: 'purpose',
       sortable: true,
       cell: (row) => {
-        const label = getParticularsName(row.particulars)
+        const label = row.purpose || 'N/A'
         return (
           <div className="py-0.5 max-w-50">
             <p

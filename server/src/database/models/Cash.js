@@ -28,7 +28,7 @@
  * @property {'cd_received_by'} received_by
  * @property {'cd_revolving_fund_id'} revolving_fund_id
  * @property {'cd_department_id'} department_id
- * @property {'cd_particulars'} particulars
+ * @property {'cd_purpose'} purpose
  * @property {'cd_amount_issued'} amount_issued
  * @property {'cd_cash_voucher'} cash_voucher
  * @property {'cd_amount_returned'} amount_returned
@@ -52,7 +52,7 @@
  * @property {'cda_cash_disbursement_id'} cash_disbursement_id
  * @property {'cda_amount'} amount
  * @property {'cda_remarks'} remarks
- * @property {'cda_particulars'} particulars
+ * @property {'cda_purpose'} purpose
  * @property {'cda_createdAt'} createdAt
  */
 
@@ -104,7 +104,7 @@ const Cash = {
       received_by: 'cd_received_by',
       revolving_fund_id: 'cd_revolving_fund_id',
       department_id: 'cd_department_id',
-      particulars: 'cd_particulars',
+      purpose: 'cd_purpose',
       amount_issued: 'cd_amount_issued',
       cash_voucher: 'cd_cash_voucher',
       amount_returned: 'cd_amount_returned',
@@ -113,8 +113,8 @@ const Cash = {
       status: 'cd_status',
       createdAt: 'cd_createdAt',
     },
-    select: ['cd_id', 'cd_cash_request_id', 'cd_date_issued', 'cd_received_by', 'cd_revolving_fund_id', 'cd_department_id', 'cd_particulars', 'cd_amount_issued', 'cd_cash_voucher', 'cd_amount_returned', 'cd_outstanding_amount', 'cd_amount_expended', 'cd_status', 'cd_createdAt'],
-    insert: ['cd_cash_request_id', 'cd_received_by', 'cd_revolving_fund_id', 'cd_department_id', 'cd_particulars', 'cd_amount_issued', 'cd_cash_voucher', 'cd_amount_returned', 'cd_outstanding_amount', 'cd_amount_expended', 'cd_status'],
+    select: ['cd_id', 'cd_cash_request_id', 'cd_date_issued', 'cd_received_by', 'cd_revolving_fund_id', 'cd_department_id', 'cd_purpose', 'cd_amount_issued', 'cd_cash_voucher', 'cd_amount_returned', 'cd_outstanding_amount', 'cd_amount_expended', 'cd_status', 'cd_createdAt'],
+    insert: ['cd_cash_request_id', 'cd_received_by', 'cd_revolving_fund_id', 'cd_department_id', 'cd_purpose', 'cd_amount_issued', 'cd_cash_voucher', 'cd_amount_returned', 'cd_outstanding_amount', 'cd_amount_expended', 'cd_status'],
   },
   DisbursementFile: {
     table: 'cash_disbursement_file',
@@ -140,11 +140,11 @@ const Cash = {
       cash_disbursement_id: 'cda_cash_disbursement_id',
       amount: 'cda_amount',
       remarks: 'cda_remarks',
-      particulars: 'cda_particulars',
+      purpose: 'cda_purpose',
       createdAt: 'cda_createdAt',
     },
-    select: ['cda_id', 'cda_cash_disbursement_id', 'cda_amount', 'cda_remarks', 'cda_particulars', 'cda_createdAt'],
-    insert: ['cda_cash_disbursement_id', 'cda_amount', 'cda_remarks', 'cda_particulars'],
+    select: ['cda_id', 'cda_cash_disbursement_id', 'cda_amount', 'cda_remarks', 'cda_purpose', 'cda_createdAt'],
+    insert: ['cda_cash_disbursement_id', 'cda_amount', 'cda_remarks', 'cda_purpose'],
   },
   RequestActivity: {
     table: 'cash_request_activity',

@@ -46,10 +46,8 @@ function DisbursementsPage() {
     revolvingFunds,
     departments,
     employees,
-    particulars,
     getDepartmentName,
     getEmployeeName,
-    getParticularsName,
     getFundLabel,
   } = useCashDisbursementLookups()
 
@@ -93,26 +91,19 @@ function DisbursementsPage() {
       const q = searchTerm.toLowerCase()
       const employeeName = getEmployeeName(item.received_by).toLowerCase()
       const departmentName = getDepartmentName(item.department_id).toLowerCase()
-      const particularsName = getParticularsName(item.particulars).toLowerCase()
+      const purposeText = String(item.purpose || '').toLowerCase()
 
       const matchesSearch =
         (item.cash_voucher || '').toLowerCase().includes(q) ||
         employeeName.includes(q) ||
         departmentName.includes(q) ||
-        particularsName.includes(q) ||
+        purposeText.includes(q) ||
         String(item.id ?? '').includes(q)
 
       const matchesStatus = statusFilter === 'ALL' || item.status === statusFilter
       return matchesSearch && matchesStatus
     })
-  }, [
-    disbursements,
-    searchTerm,
-    statusFilter,
-    getEmployeeName,
-    getDepartmentName,
-    getParticularsName,
-  ])
+  }, [disbursements, searchTerm, statusFilter, getEmployeeName, getDepartmentName])
 
   const columns = useMemo(
     () =>
@@ -121,17 +112,9 @@ function DisbursementsPage() {
         onSubmit: handleSubmitAction,
         getEmployeeName,
         getDepartmentName,
-        getParticularsName,
         allDisbursements: disbursements,
       }),
-    [
-      handleEdit,
-      handleSubmitAction,
-      getEmployeeName,
-      getDepartmentName,
-      getParticularsName,
-      disbursements,
-    ],
+    [handleEdit, handleSubmitAction, getEmployeeName, getDepartmentName, disbursements],
   )
 
   return (
@@ -276,7 +259,6 @@ function DisbursementsPage() {
           revolvingFunds={revolvingFunds}
           employees={employees}
           departments={departments}
-          particulars={particulars}
           getFundLabel={getFundLabel}
         />
       )}
@@ -290,7 +272,6 @@ function DisbursementsPage() {
           isSubmitting={isMutating}
           employees={employees}
           departments={departments}
-          particulars={particulars}
         />
       )}
 

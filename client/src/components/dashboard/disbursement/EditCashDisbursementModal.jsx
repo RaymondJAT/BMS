@@ -9,12 +9,11 @@ export default function EditCashDisbursementModal({
   isSubmitting,
   employees = [],
   departments = [],
-  particulars = [],
 }) {
   const [formData, setFormData] = useState({
     received_by: '',
     department_id: '',
-    particulars: '',
+    purpose: '',
     cash_voucher: '',
     amount_issued: '',
   })
@@ -37,7 +36,7 @@ export default function EditCashDisbursementModal({
       setFormData({
         received_by: disbursement.received_by ?? '',
         department_id: disbursement.department_id ?? '',
-        particulars: disbursement.particulars ?? '',
+        purpose: disbursement.purpose || '',
         cash_voucher: disbursement.cash_voucher || '',
         amount_issued: disbursement.amount_issued ?? disbursement.amount ?? '',
       })
@@ -88,7 +87,7 @@ export default function EditCashDisbursementModal({
     if (
       !formData.received_by ||
       !formData.department_id ||
-      !formData.particulars ||
+      !formData.purpose ||
       !formData.cash_voucher
     ) {
       setFormError('Please fill out all required fields.')
@@ -99,7 +98,7 @@ export default function EditCashDisbursementModal({
       id: disbursement.id,
       received_by: formData.received_by,
       department_id: formData.department_id,
-      particulars: formData.particulars,
+      purpose: formData.purpose,
       cash_voucher: formData.cash_voucher,
       amount_issued: amount,
       originalAmount,
@@ -117,7 +116,7 @@ export default function EditCashDisbursementModal({
       isOpen={isOpen}
       onClose={onClose}
       title="Edit Cash Disbursement"
-      subtitle="Update payee, department, particulars, voucher number, or amount issued."
+      subtitle="Update payee, department, purpose, voucher number, or amount issued."
       maxWidth="max-w-lg"
     >
       <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-3.5">
@@ -182,25 +181,20 @@ export default function EditCashDisbursementModal({
           </div>
         </div>
 
-        {/* PARTICULARS & AMOUNT ISSUED */}
+        {/* PURPOSE & AMOUNT ISSUED */}
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 sm:gap-3">
           <div className="sm:col-span-8">
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Particulars <span className="text-red-500">*</span>
+              Purpose <span className="text-red-500">*</span>
             </label>
-            <select
+            <input
+              type="text"
               required
-              value={formData.particulars}
-              onChange={(e) => setFormData({ ...formData, particulars: e.target.value })}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all cursor-pointer"
-            >
-              <option value="">Select Particulars...</option>
-              {particulars.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name || p.description || `Particulars #${p.id}`}
-                </option>
-              ))}
-            </select>
+              placeholder="Office Supplies"
+              value={formData.purpose}
+              onChange={(e) => setFormData({ ...formData, purpose: e.target.value })}
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all placeholder:text-slate-400"
+            />
           </div>
 
           <div className="sm:col-span-4">

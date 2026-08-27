@@ -11,6 +11,8 @@ import FinanceReviewModal from '../../../components/dashboard/liquidation/Financ
 import useLiquidations from '../../../hooks/useLiquidations'
 import useLiquidationMasterData from '../../../hooks/useLiquidationMasterData'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
+import { useCashDisbursements } from '../../../hooks/useCashDisbursements'
+import useRevolvingFunds from '../../../hooks/useRevolvingFunds'
 import { liquidationApi } from '../../../api/liquidationApi'
 
 export const Route = createFileRoute('/_authenticated/workbench/liquidation')({
@@ -35,6 +37,12 @@ function LiquidationPage() {
   } = useLiquidations({ role: userRole })
   const { districts, modes, getModeName } = useLiquidationMasterData()
   const { particulars, getEmployeeName } = useCashDisbursementLookups()
+
+  // Needed only for the Verify modal's fund picker: the disbursement tied
+  // to the liquidation (to find its ORIGINAL fund + that fund's status)
+  // and the pool of funds eligible to receive a Return/Reimbursement.
+  const { disbursements = [] } = useCashDisbursements()
+  const { funds = [] } = useRevolvingFunds()
 
   const [activeModal, setActiveModal] = useState(null)
   const [selected, setSelected] = useState(null)
@@ -83,6 +91,26 @@ function LiquidationPage() {
     () => [...activity].reverse().find((a) => a.receipt)?.receipt,
     [activity],
   )
+
+  // The disbursement this liquidation is settling — carries the ORIGINAL
+  // fund id/status the Verify modal needs to decide whether a fund picker
+  // is even required.
+  const disbursementForSelected = useMemo(() => {
+    if (!detail) return null
+    return disbursements.find((d) => String(d.cash_request_id) === String(detail.cash_request_id))
+  }, [detail, disbursements])
+
+  const originalFundId = disbursementForSelected?.revolving_fund_id ?? null
+  const originalFund = useMemo(
+    () => funds.find((f) => String(f.id) === String(originalFundId)),
+    [funds, originalFundId],
+  )
+
+  // Eligible targets for Cash to Return / Reimbursement — CLOSED funds
+  // can't receive either (mirrors NON_ISSUABLE_RF_STATUSES's CLOSED leg
+  // for a Return; Reimbursement is further screened server-side by
+  // checkReimbursementEligibility for CLEARED/RETURN + balance).
+  const eligibleFundsForVerify = useMemo(() => funds.filter((f) => f.status !== 'CLOSED'), [funds])
 
   const columns = useMemo(
     () =>
@@ -187,6 +215,9 @@ function LiquidationPage() {
           onReject={(p) => rejectLiquidation(selected.id, p)}
           isSubmitting={isMutating}
           getEmployeeName={getEmployeeName}
+          revolvingFunds={eligibleFundsForVerify}
+          originalFundId={originalFundId}
+          originalFundStatus={originalFund?.status}
         />
       )}
       {activeModal === 'finance' && detail && (

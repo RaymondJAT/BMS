@@ -55,24 +55,8 @@ const Liquidation = {
       status: 'l_status',
       createdAt: 'l_createdAt',
     },
-    select: [
-      'l_id',
-      'l_cash_request_id',
-      'l_description',
-      'l_amount_obtained',
-      'l_amount_expended',
-      'l_reimburse_return',
-      'l_status',
-      'l_createdAt',
-    ],
-    insert: [
-      'l_cash_request_id',
-      'l_description',
-      'l_amount_obtained',
-      'l_amount_expended',
-      'l_reimburse_return',
-      'l_status',
-    ],
+    select: ['l_id', 'l_cash_request_id', 'l_description', 'l_amount_obtained', 'l_amount_expended', 'l_reimburse_return', 'l_status', 'l_createdAt'],
+    insert: ['l_cash_request_id', 'l_description', 'l_amount_obtained', 'l_amount_expended', 'l_reimburse_return', 'l_status'],
   },
   Item: {
     table: 'liquidation_item',
@@ -91,28 +75,8 @@ const Liquidation = {
       mode_of_transportation_id: 'li_mode_of_transportation_id',
       amount: 'li_amount',
     },
-    select: [
-      'li_id',
-      'li_liquidation_id',
-      'li_date',
-      'li_rt',
-      'li_store_name',
-      'li_particulars',
-      'li_from',
-      'li_to',
-      'li_mode_of_transportation_id',
-      'li_amount',
-    ],
-    insert: [
-      'li_liquidation_id',
-      'li_rt',
-      'li_store_name',
-      'li_particulars',
-      'li_from',
-      'li_to',
-      'li_mode_of_transportation_id',
-      'li_amount',
-    ],
+    select: ['li_id', 'li_liquidation_id', 'li_date', 'li_rt', 'li_store_name', 'li_particulars', 'li_from', 'li_to', 'li_mode_of_transportation_id', 'li_amount'],
+    insert: ['li_liquidation_id', 'li_rt', 'li_store_name', 'li_particulars', 'li_from', 'li_to', 'li_mode_of_transportation_id', 'li_amount'],
   },
   Activity: {
     table: 'liquidation_activity',
@@ -128,17 +92,9 @@ const Liquidation = {
       created_by: 'la_created_by',
       createdAt: 'la_createdAt',
     },
-    select: [
-      'la_id',
-      'la_liquidation_id',
-      'la_action',
-      'la_remarks',
-      'la_receipt',
-      'la_created_by',
-      'la_createdAt',
-    ],
+    select: ['la_id', 'la_liquidation_id', 'la_action', 'la_remarks', 'la_receipt', 'la_created_by', 'la_createdAt'],
     insert: ['la_liquidation_id', 'la_action', 'la_remarks', 'la_receipt', 'la_created_by'],
   },
-}
+};
 
-exports.Liquidation = Liquidation
+exports.Liquidation = Liquidation;

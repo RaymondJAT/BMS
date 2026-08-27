@@ -13,8 +13,12 @@ export default function VerifyLiquidationModal({
   isSubmitting,
   getEmployeeName,
   receipt,
+  revolvingFunds = [], // eligible (non-CLOSED) funds to settle against
+  originalFundId, // the disbursement's own fund id
+  originalFundStatus, // that fund's current status
 }) {
   const [remarks, setRemarks] = useState('')
+  const [selectedFundId, setSelectedFundId] = useState('')
   const [pendingAction, setPendingAction] = useState(null)
   const [formError, setFormError] = useState(null)
 
@@ -23,17 +27,34 @@ export default function VerifyLiquidationModal({
       setRemarks('')
       setPendingAction(null)
       setFormError(null)
+      setSelectedFundId('')
+      return
     }
+    // Preselect the original fund when it's still eligible; otherwise
+    // leave blank so the custodian has to actively choose a fund.
+    const originalIsEligible = revolvingFunds.some((f) => String(f.id) === String(originalFundId))
+    setSelectedFundId(originalIsEligible ? String(originalFundId) : '')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen])
+
   if (!liquidation) return null
 
   const cashReceived = parseFloat(liquidation.amount_obtained || 0)
   const totalLiquidated = parseFloat(liquidation.amount_expended || 0)
   const difference = Math.round((cashReceived - totalLiquidated) * 100) / 100
+  const needsFundSelection = difference !== 0
+  const originalFundClosed = originalFundStatus === 'CLOSED'
 
   const handleVerify = async () => {
+    if (needsFundSelection && !selectedFundId) {
+      setFormError('Select a revolving fund to settle the Cash to Return / Reimbursement against.')
+      return
+    }
     setPendingAction('verify')
-    const result = await onVerify({ remarks: remarks || undefined })
+    const result = await onVerify({
+      remarks: remarks || undefined,
+      revolving_fund_id: selectedFundId || undefined,
+    })
     setPendingAction(null)
     if (result?.success) onClose()
     else setFormError(result?.message || 'Failed to verify.')
@@ -92,6 +113,33 @@ export default function VerifyLiquidationModal({
             <span className="font-bold">{formatCurrency(Math.abs(difference))}</span>
           </div>
         </div>
+
+        {needsFundSelection && (
+          <div>
+            <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
+              Revolving Fund to Settle Against
+            </label>
+            <select
+              value={selectedFundId}
+              onChange={(e) => setSelectedFundId(e.target.value)}
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+            >
+              <option value="">Select a fund…</option>
+              {revolvingFunds.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.label || `Fund #${f.id}`} — {f.status} (Balance: {formatCurrency(f.balance)})
+                </option>
+              ))}
+            </select>
+            {originalFundClosed && (
+              <p className="text-[11px] text-orange-600 mt-1">
+                The originating fund is closed — choose an open fund to receive this{' '}
+                {difference > 0 ? 'return' : 'reimbursement'}.
+              </p>
+            )}
+          </div>
+        )}
+
         {receipt && (
           <div>
             <div className="text-[11px] font-bold text-slate-500 uppercase mb-1">Receipt</div>

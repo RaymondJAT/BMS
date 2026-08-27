@@ -419,14 +419,12 @@ function CashRequestPage() {
         <DisburseCashRequestModal
           isOpen
           onClose={handleCloseModal}
-          request={selectedRequest}
-          particulars={particulars}
+          cashRequest={selectedRequest}
           revolvingFunds={revolvingFunds}
           onDisburse={(payload) => disburseRequest(selectedRequest.id, payload)}
           onReject={(payload) => rejectRequest(selectedRequest.id, payload)}
           isSubmitting={isMutating}
           getFundLabel={getFundLabel}
-          getDepartmentName={getDepartmentName}
           getEmployeeName={getEmployeeName}
         />
       )}

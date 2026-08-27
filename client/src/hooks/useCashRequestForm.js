@@ -1,12 +1,19 @@
 import { useState, useCallback } from 'react'
 
+// Mirrors createCashRequest's required fields exactly — project, purpose,
+// amount, department_id, team_lead. employee_id is deliberately NOT part
+// of the form: it's the logged-in Requester, supplied by the caller at
+// submit time (see handleSubmit), not typed in. revolving_fund_id is
+// deliberately NOT collected here either — createCashRequest always
+// inserts it as null; fund selection happens later, at Fund Custodian
+// completion (see DisburseCashRequestModal / completeCashRequest), never
+// at creation.
 const INITIAL_FORM_STATE = {
-  department_id: '',
-  department_name: '',
+  project: '',
   purpose: '',
-  amount_requested: '',
-  revolving_fund_id: '',
-  notes: '',
+  amount: '',
+  department_id: '',
+  team_lead: '',
 }
 
 function useCashRequestForm() {

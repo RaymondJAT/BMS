@@ -97,7 +97,7 @@ export function useCashDisbursements(initialParams = {}) {
     [runMutation],
   )
 
-  // Metadata-only edit (received_by, department_id, particulars, cash_voucher)
+  // Metadata-only edit (received_by, department_id, purpose, cash_voucher)
   // — id is required; the backend rejects metadata upserts without one.
   // Doesn't touch any revolving_fund, so no funds-cache invalidation needed.
   const updateMetadata = useCallback(
@@ -116,15 +116,15 @@ export function useCashDisbursements(initialParams = {}) {
 
   /**
    * Combined save used by EditCashDisbursementModal: that modal collects
-   * both metadata fields (received_by/department_id/particulars/
-   * cash_voucher) and amount_issued in one form, but the backend
-   * deliberately splits these into two endpoints — upsertCashDisbursement
-   * (metadata only) and editCashDisbursementAmount (amount, with its own
-   * difference-based recalculation against the fund/budget). This runs
-   * both, but only calls editAmount when the amount actually changed
-   * (matches "difference === 0 -> no financial records touched" from the
-   * backend's own contract, and avoids an unnecessary extra request /
-   * activity-log entry on every metadata-only edit).
+   * both metadata fields (received_by/department_id/purpose/cash_voucher)
+   * and amount_issued in one form, but the backend deliberately splits
+   * these into two endpoints — upsertCashDisbursement (metadata only) and
+   * editCashDisbursementAmount (amount, with its own difference-based
+   * recalculation against the fund/budget). This runs both, but only
+   * calls editAmount when the amount actually changed (matches
+   * "difference === 0 -> no financial records touched" from the backend's
+   * own contract, and avoids an unnecessary extra request / activity-log
+   * entry on every metadata-only edit).
    *
    * If metadata succeeds but the amount edit fails (e.g. insufficient
    * fund balance for an increase), metadata changes are NOT rolled back —
@@ -139,7 +139,7 @@ export function useCashDisbursements(initialParams = {}) {
         id: payload.id,
         received_by: payload.received_by,
         department_id: payload.department_id,
-        particulars: payload.particulars,
+        purpose: payload.purpose,
         cash_voucher: payload.cash_voucher,
       })
 
@@ -228,7 +228,7 @@ export function useCashDisbursements(initialParams = {}) {
               revolving_fund_id: revolving_fund_id || disbursement.revolving_fund_id,
               received_by: disbursement.received_by,
               department_id: disbursement.department_id,
-              particulars: disbursement.particulars,
+              purpose: disbursement.purpose,
               amount_reimburse: reimburseAmt,
               cash_voucher: disbursement.cash_voucher,
             })

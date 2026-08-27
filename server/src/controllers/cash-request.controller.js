@@ -8,8 +8,7 @@ const SQL = new SQLQueryBuilder()
 // SHARED HELPERS
 // (duplicated rather than imported from cashDisbursementController.js /
 // revolvingFundController.js — matches this codebase's existing
-// per-controller pattern; see buildBudgetChangeQueries's docstring in
-// revolvingFundController.js for the same call.)
+// per-controller pattern.)
 // ==========================================
 
 const wrapRow = (row, model) => {
@@ -49,11 +48,9 @@ const NON_ISSUABLE_RF_STATUSES = ['CLOSED', 'CLEARED', 'RETURN']
 
 /**
  * Recomputes a freshly-created cash_disbursement row's outstanding/status.
- * Copied from cashDisbursementController.js. For a Cash-Request-generated
- * disbursement this always resolves to (outstanding = amount, status =
- * UNLIQUIDATED) since returned/expended start at 0 — kept as a function
- * rather than inlined so the invariant stays obviously identical to every
- * other place a cash_disbursement row is created.
+ * For a Cash-Request-generated disbursement this always resolves to
+ * (outstanding = amount, status = UNLIQUIDATED) since returned/expended
+ * start at 0.
  */
 const computeCdStatus = (issued, returned, expended) => {
   const raw = parseNum(issued) - parseNum(returned) - parseNum(expended)
@@ -91,24 +88,8 @@ const getRevolvingFundById = async (id) => {
   return wrapRow(row, Revolving.Fund)
 }
 
-/**
- * Duplicate-disbursement guard for §11 of the spec: at most one
- * cash_disbursement may ever reference a given cash_request_id.
- */
-/**
- * cash_disbursement_activity.cda_particulars is a free-text STRING(300)
- * column with no FK — unlike cash_disbursement.cd_particulars, which is an
- * FK integer to master_particulars. Copied from
- * cashDisbursementController.js so the activity log reads the same
- * category name convention everywhere, instead of a raw id.
- */
-const getParticularsNameById = async (particularsId) => {
-  const rows = await Query(`SELECT mpt_name FROM master_particulars WHERE mpt_id = ?`, [
-    particularsId,
-  ])
-  return rows[0]?.mpt_name || null
-}
-
+/** Duplicate-disbursement guard: at most one cash_disbursement may ever
+ * reference a given cash_request_id. */
 const getDisbursementForCashRequest = async (cashRequestId) => {
   const { sql, bindings } = SQL.model(Cash.Disbursement)
     .select([Cash.Disbursement.cols.id])
@@ -139,14 +120,37 @@ const generateReferenceId = async () => {
 }
 
 /**
+ * Cash voucher numbers are a single ascending sequence, unlike the
+ * date-scoped Cash Request reference id (generateReferenceId) — auditors
+ * expect gaps/duplicates in a voucher sequence to be visible, which a
+ * per-day reset would hide. Scanned against cash_disbursement (not
+ * cash_request) since cd_cash_voucher is the field actually reused/
+ * limited against elsewhere (see checkCashVoucherLimit in
+ * cashDisbursementController.js).
+ *
+ * NOTE: this read isn't inside a transaction, so two Fund Custodians
+ * completing two different requests near-simultaneously could generate
+ * the same voucher number. If that's a real risk in your deployment, add
+ * a UNIQUE constraint on cd_cash_voucher and retry-on-collision, or
+ * switch to a DB sequence — same caveat applies to generateReferenceId.
+ */
+const generateCashVoucher = async () => {
+  const rows = await Query(
+    `SELECT MAX(CAST(SUBSTRING_INDEX(cd_cash_voucher, '-', -1) AS UNSIGNED)) AS max_sequence
+     FROM cash_disbursement
+     WHERE cd_cash_voucher LIKE 'CV-%'`,
+  )
+  const maxSequence = rows[0]?.max_sequence || 0
+  return `CV-${String(maxSequence + 1).padStart(6, '0')}`
+}
+
+/**
  * TEMP: no real RBAC wired up yet, matching the `req.userId || req.user?.id
  * || 1` fallback used everywhere else in this codebase. Until auth lands,
  * this ENFORCES the check whenever a role is actually present on the
  * request, and only WARNS (never silently passes without a trace) when
- * it's missing — so it's visible in logs exactly which endpoints are still
- * running without real authorization, instead of that fact being invisible
- * until a permissions bug ships. Replace the `if (!role)` branch with a
- * hard 401/403 once auth is wired up.
+ * it's missing. Replace the `if (!role)` branch with a hard 401/403 once
+ * auth is wired up.
  *
  * @param {string[]} allowedRoles
  */
@@ -179,16 +183,9 @@ const requireRole = (req, res, allowedRoles) => {
  *              request is purely a request until Team Lead approval and
  *              Fund Custodian completion (see completeCashRequest).
  *
- *              BMS V1 → V2 field mapping: V1's `Particulars` becomes V2's
- *              `Purpose`; `Project` is new in V2 and has no V1 equivalent.
- *
- *              The target Revolving Fund is checked for basic eligibility
- *              (not CLOSED/CLEARED/RETURN) at creation so a request isn't
- *              allowed to sit in PENDING/APPROVED only to fail for a
- *              reason that was already knowable up front — but balance
- *              itself is NOT checked here, since the fund's available
- *              balance can legitimately change between request and
- *              completion; that check happens for real at completion time.
+ *              The target Revolving Fund is NOT collected here at all —
+ *              revolving_fund_id is only ever assigned at completion time
+ *              by the Fund Custodian (see completeCashRequest).
  */
 const createCashRequest = async (req, res) => {
   // #swagger.tags = ['Cash Request']
@@ -197,9 +194,8 @@ const createCashRequest = async (req, res) => {
   // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
   /*
     #swagger.parameters['project'] = { in: 'formData', type: 'string', required: true, description: 'Project this request is charged against' }
-    #swagger.parameters['purpose'] = { in: 'formData', type: 'string', required: true, description: 'Purpose of the request (BMS V1 Particulars equivalent)' }
+    #swagger.parameters['purpose'] = { in: 'formData', type: 'string', required: true, description: 'Purpose of the request' }
     #swagger.parameters['amount'] = { in: 'formData', type: 'number', required: true, description: 'Requested amount' }
-    #swagger.parameters['revolving_fund_id'] = { in: 'formData', type: 'integer', required: true, description: 'Revolving Fund this request will draw from once completed' }
     #swagger.parameters['employee_id'] = { in: 'formData', type: 'integer', required: true, description: 'Requesting employee id (master_employee.me_id)' }
     #swagger.parameters['department_id'] = { in: 'formData', type: 'integer', required: true, description: 'Department id (master_department.md_id)' }
     #swagger.parameters['team_lead'] = { in: 'formData', type: 'string', required: true, description: 'Team lead name/identifier responsible for approval' }
@@ -442,18 +438,20 @@ const rejectCashRequest = async (req, res) => {
   }
 }
 
-// ── NEW: updateCashRequest ────────────────────────────────────────
+// ==========================================
+// WORKFLOW: UPDATE (Requester, PENDING/REJECTED only)
+// ==========================================
+
 /**
  * @name updateCashRequest
  * @description Requester edits their own Cash Request. Only allowed while
  *              status is PENDING (not yet Team-Lead-acted-on) or REJECTED
  *              (returned for correction). Saving always resets status to
  *              PENDING and logs a REQUESTED activity entry — a resubmit is
- *              modeled as re-entering the Team Leader queue, matching
- *              §8's suggested flow (REJECTED -> REQUESTER EDIT -> PENDING_TEAM_LEADER).
- *              Never touches revolving_fund_id, cv_number, or status fields
- *              beyond the reset above — those are owned by the approval
- *              stages, not by an edit.
+ *              modeled as re-entering the Team Leader queue. Never touches
+ *              revolving_fund_id, cv_number, or status fields beyond the
+ *              reset above — those are owned by the approval stages, not
+ *              by an edit.
  */
 const updateCashRequest = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
@@ -525,9 +523,16 @@ const updateCashRequest = async (req, res) => {
 
 /**
  * @name completeCashRequest
- * @description Fund Custodian completes an APPROVED Cash Request. This is
- *              the ONLY step that creates real money movement: it
- *              generates exactly one cash_disbursement row (status
+ * @description Fund Custodian completes an APPROVED Cash Request. Only
+ *              input needed from the custodian is which Revolving Fund to
+ *              draw from. cd_purpose is copied straight from the request's
+ *              own purpose (no separate categorization step here — that
+ *              happens at Liquidation, via master_particulars on each
+ *              liquidation_item, not here). cd_cash_voucher is generated
+ *              server-side (see generateCashVoucher) as CV-###### the
+ *              moment this call succeeds.
+ *
+ *              Generates exactly one cash_disbursement row (status
  *              UNLIQUIDATED) against the request's Revolving Fund and
  *              cascades to that fund's issued/outstanding/balance/status —
  *              identical to issueCashDisbursement's cascade in
@@ -537,47 +542,36 @@ const updateCashRequest = async (req, res) => {
  *              same reason issueCashDisbursement doesn't: the Budget was
  *              already debited when this fund was funded/topped-up, and
  *              the Budget's Deployed/Remaining figures are derived live
- *              from the fund's own balance+outstanding — never a separate
- *              counter — so nothing here can double-count.
+ *              from the fund's own balance+outstanding.
  *
  *              The Cash Request itself is a workflow/approval record, not
  *              a financial one — its ₱ amount is never separately added to
  *              any utilization total. Only the resulting Cash Disbursement
- *              is the financial source of truth (see spec §7).
+ *              is the financial source of truth.
  *
  *              Idempotent: a request that's already COMPLETED, or that
  *              already has a linked cash_disbursement row for any reason,
  *              is rejected outright — at most one disbursement is ever
- *              created per request (see spec §11).
+ *              created per request.
  *
  *              Project/Purpose traceability: the generated disbursement
- *              does NOT copy project/purpose onto itself. It stores
- *              cd_cash_request_id, and Project/Purpose are read by joining
- *              back to the source cash_request — see this file's header
- *              comment and the migration that added cd_cash_request_id.
- *
- *              cd_particulars is a required FK (NOT NULL) to
- *              master_particulars — a categorized lookup, unlike Purpose's
- *              free text — so it can't be left blank just because the
- *              request didn't specify one. The Fund Custodian MUST supply
- *              a valid `particulars` id at completion time to categorize
- *              the disbursement, same as every other disbursement action
- *              in cashDisbursementController.js.
+ *              does NOT copy project onto itself, only purpose. It stores
+ *              cd_cash_request_id, and Project is read by joining back to
+ *              the source cash_request.
  */
 const completeCashRequest = async (req, res) => {
   // #swagger.tags = ['Cash Request']
-  // #swagger.description = "Fund Custodian completes an APPROVED Cash Request. Generates exactly one UNLIQUIDATED Cash Disbursement against the request's Revolving Fund. Idempotent — rejects if already COMPLETED or already linked to a disbursement."
+  // #swagger.description = "Fund Custodian completes an APPROVED Cash Request by selecting a Revolving Fund. Purpose is copied from the request; cash voucher is generated automatically. Generates exactly one UNLIQUIDATED Cash Disbursement. Idempotent — rejects if already COMPLETED or already linked to a disbursement."
   // #swagger.autoBody = false
   // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
   /*
     #swagger.parameters['id'] = { in: 'formData', type: 'integer', required: true, description: 'Cash request id' }
-    #swagger.parameters['cash_voucher'] = { in: 'formData', type: 'string', required: false, description: "Cash voucher number to finalize on both the request and the generated disbursement. Defaults to the request's reference_id if not supplied." }
-    #swagger.parameters['particulars'] = { in: 'formData', type: 'integer', required: true, description: 'master_particulars id to categorize the generated disbursement. Required — cd_particulars is a NOT NULL FK, and Purpose (free text) does not map to it automatically.' }
+    #swagger.parameters['revolving_fund_id'] = { in: 'formData', type: 'integer', required: true, description: 'Revolving Fund to disburse from' }
     #swagger.parameters['remarks'] = { in: 'formData', type: 'string', required: false, description: 'Optional completion remarks' }
   */
 
   const userId = req.userId || req.user?.id || 1
-  const { id, revolving_fund_id, cash_voucher, particulars, remarks } = req.body
+  const { id, revolving_fund_id, remarks } = req.body
 
   if (!id) return res.status(400).json({ message: 'Missing required field: id' })
   if (!revolving_fund_id) {
@@ -585,9 +579,6 @@ const completeCashRequest = async (req, res) => {
       message:
         'Missing required field: revolving_fund_id — the Fund Custodian must select a fund before approving.',
     })
-  }
-  if (particulars === undefined || particulars === null || particulars === '') {
-    return res.status(400).json({ message: 'Missing required field: particulars' })
   }
 
   if (!requireRole(req, res, ['FUND_CUSTODIAN', 'ADMIN'])) return
@@ -622,8 +613,7 @@ const completeCashRequest = async (req, res) => {
     }
 
     // Belt-and-suspenders duplicate guard — the status check above already
-    // makes this practically unreachable (a request only ever passes
-    // through APPROVED -> COMPLETED once), but this catches any row that
+    // makes this practically unreachable, but this catches any row that
     // nonetheless already has a linked disbursement, e.g. from a retried
     // request after a partial failure elsewhere.
     const existingCd = await getDisbursementForCashRequest(id)
@@ -652,15 +642,7 @@ const completeCashRequest = async (req, res) => {
         .json({ message: 'Insufficient revolving fund balance to complete this cash request.' })
     }
 
-    const particularsName = await getParticularsNameById(particulars)
-    if (!particularsName) {
-      return res
-        .status(400)
-        .json({ message: 'Invalid particulars id — no matching master_particulars entry found.' })
-    }
-
-    const finalCashVoucher =
-      cash_voucher || cr[Cash.Request.cols.cv_number] || cr[Cash.Request.cols.reference_id]
+    const finalCashVoucher = await generateCashVoucher()
     const { outstanding, status: cdStatus } = computeCdStatus(requestAmount, 0, 0)
 
     // Step 1: insert the CD row on its own — its generated id is needed by
@@ -673,7 +655,7 @@ const completeCashRequest = async (req, res) => {
         [Cash.Disbursement.cols.received_by]: cr[Cash.Request.cols.employee_id],
         [Cash.Disbursement.cols.revolving_fund_id]: fundId,
         [Cash.Disbursement.cols.department_id]: cr[Cash.Request.cols.department_id],
-        [Cash.Disbursement.cols.particulars]: particulars,
+        [Cash.Disbursement.cols.purpose]: purpose,
         [Cash.Disbursement.cols.amount_issued]: requestAmount,
         [Cash.Disbursement.cols.cash_voucher]: finalCashVoucher,
         [Cash.Disbursement.cols.amount_returned]: 0,
@@ -701,7 +683,7 @@ const completeCashRequest = async (req, res) => {
           [Cash.DisbursementActivity.cols.amount]: requestAmount,
           [Cash.DisbursementActivity.cols.remarks]:
             `Issued via Cash Request ${cr[Cash.Request.cols.reference_id]} — ${project} / ${purpose}: ₱${requestAmount.toFixed(2)}`,
-          [Cash.DisbursementActivity.cols.particulars]: particularsName,
+          [Cash.DisbursementActivity.cols.purpose]: purpose,
         })
         .build()
 
@@ -719,7 +701,7 @@ const completeCashRequest = async (req, res) => {
         .insert({
           [Revolving.FundActivity.cols.revolving_fund_id]: fundId,
           [Revolving.FundActivity.cols.remarks]:
-            `Cash Request ${cr[Cash.Request.cols.reference_id]} completed and issued ₱${requestAmount.toFixed(2)} — issued (${newRfIssued}), outstanding (${newRfOutstanding}), balance (${newRfBalance}), status: ${newRfStatus}.`,
+            `Cash Request ${cr[Cash.Request.cols.reference_id]} completed and issued ₱${requestAmount.toFixed(2)} (Voucher ${finalCashVoucher}) — issued (${newRfIssued}), outstanding (${newRfOutstanding}), balance (${newRfBalance}), status: ${newRfStatus}.`,
           [Revolving.FundActivity.cols.user_id]: userId,
         })
         .build()
@@ -734,8 +716,7 @@ const completeCashRequest = async (req, res) => {
         .build()
 
       // action: 'RECEIVED' — matches the existing cra_action ENUM (which
-      // has no COMPLETED value) and mirrors V1's own mapping of a
-      // completed/received cash request to the RECEIVED activity action.
+      // has no COMPLETED value).
       const crActivityQuery = SQL.model(Cash.RequestActivity)
         .insert({
           [Cash.RequestActivity.cols.user_id]: userId,
@@ -743,7 +724,7 @@ const completeCashRequest = async (req, res) => {
           [Cash.RequestActivity.cols.action]: 'RECEIVED',
           [Cash.RequestActivity.cols.remarks]:
             remarks ||
-            `Completed by fund custodian — cash disbursement #${newCdId} created (₱${requestAmount.toFixed(2)}).`,
+            `Completed by fund custodian — cash disbursement #${newCdId} created (Voucher ${finalCashVoucher}, ₱${requestAmount.toFixed(2)}).`,
         })
         .build()
 
@@ -779,6 +760,7 @@ const completeCashRequest = async (req, res) => {
       message: 'Cash request completed successfully — cash disbursement created.',
       cash_request_id: id,
       cash_disbursement_id: newCdId,
+      cash_voucher: finalCashVoucher,
     })
   } catch (error) {
     console.error('Error in completeCashRequest:', error)
@@ -802,7 +784,7 @@ const completeCashRequest = async (req, res) => {
  *                - liquidation_id / liquidation_status: whether a
  *                  Liquidation already exists for this request, and its
  *                  current stage — drives the Liquidate button's
- *                  visibility on the Cash Request page (§2/§18).
+ *                  visibility on the Cash Request page.
  *              Stays raw SQL rather than the query builder for the same
  *              reason getBudgetBudget does — aliased derived joins the
  *              builder doesn't support.

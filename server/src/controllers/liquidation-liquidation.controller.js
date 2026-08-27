@@ -5,7 +5,7 @@ const { Revolving } = require('../database/models/Revolving')
 const SQL = new SQLQueryBuilder()
 
 // ==========================================
-// SHARED HELPERS (duplicated per this codebase's per-controller convention)
+// ROW ACCESS (duplicated per this codebase's per-controller convention)
 // ==========================================
 
 const wrapRow = (row, model) => {
@@ -21,47 +21,6 @@ const wrapRow = (row, model) => {
       return undefined
     },
   })
-}
-
-const parseNum = (val, defaultVal = 0) => {
-  if (val === null || val === undefined) return defaultVal
-  const parsed = parseFloat(val)
-  return isNaN(parsed) ? defaultVal : parsed
-}
-
-const toTxQuery = ({ sql, bindings }) => ({ sql, values: bindings })
-
-const NON_ISSUABLE_RF_STATUSES = ['CLOSED', 'CLEARED', 'RETURN']
-
-const computeCdStatus = (issued, returned, expended) => {
-  const raw = parseNum(issued) - parseNum(returned) - parseNum(expended)
-  const outstanding = Math.max(0, Math.round(raw * 100) / 100)
-  const status = outstanding === 0 ? 'LIQUIDATED' : 'UNLIQUIDATED'
-  return { outstanding, status }
-}
-
-const computeRfStatus = (currentStatus, hasActivity) => {
-  if (currentStatus === 'CLOSED' || currentStatus === 'CLEARED' || currentStatus === 'RETURN') {
-    return currentStatus
-  }
-  return hasActivity ? 'ON REVIEW' : currentStatus
-}
-
-const requireRole = (req, res, allowedRoles) => {
-  const role = req.userRole || req.user?.role
-  if (!role) {
-    console.warn(
-      `WARNING: role check skipped (no auth wired up yet) — endpoint requires one of [${allowedRoles.join(', ')}]`,
-    )
-    return true
-  }
-  if (!allowedRoles.includes(role)) {
-    res.status(403).json({
-      message: `This action requires one of the following roles: ${allowedRoles.join(', ')}.`,
-    })
-    return false
-  }
-  return true
 }
 
 const getLiquidationById = async (id) => {
@@ -100,15 +59,6 @@ const getDisbursementByCashRequestId = async (cashRequestId) => {
   return wrapRow(row, Cash.Disbursement)
 }
 
-const getDisbursementById = async (id) => {
-  const { sql, bindings } = SQL.model(Cash.Disbursement)
-    .select(Cash.Disbursement.select)
-    .where(Cash.Disbursement.pk, id)
-    .build()
-  const [row] = await Query(sql, bindings)
-  return wrapRow(row, Cash.Disbursement)
-}
-
 const getRevolvingFundById = async (id) => {
   const { sql, bindings } = SQL.model(Revolving.Fund)
     .select(Revolving.Fund.select)
@@ -119,20 +69,12 @@ const getRevolvingFundById = async (id) => {
 }
 
 /**
- * l_id has no dedicated reference-id column (unlike cash_request's
- * cr_reference_id) — derived rather than stored, to avoid inventing a
- * migration for something purely cosmetic.
- */
-const toReferenceId = (id) => `LQ-${String(id).padStart(6, '0')}`
-
-/**
  * True if this employee has a COMPLETED Cash Request whose Cash
- * Disbursement is still UNLIQUIDATED. Since settlement (and the resulting
- * LIQUIDATED status) now happens at verifyLiquidation instead of
- * completeLiquidation (see that function's docstring below), this
- * unblocks a Requester's next Cash Request as soon as the Fund Custodian
- * verifies their liquidation — they no longer have to wait for Finance's
- * post-audit sign-off, which matches the corrected workflow.
+ * Disbursement is still UNLIQUIDATED. Settlement (and the resulting
+ * LIQUIDATED status) happens at verifyLiquidation, not completeLiquidation
+ * (see verifyLiquidation's docstring) — so this unblocks a Requester's
+ * next Cash Request as soon as the Fund Custodian verifies, without
+ * waiting for Finance's post-audit sign-off.
  */
 const hasOutstandingLiquidation = async (employeeId) => {
   const rows = await Query(
@@ -147,28 +89,164 @@ const hasOutstandingLiquidation = async (employeeId) => {
 }
 module.exports.hasOutstandingLiquidation = hasOutstandingLiquidation
 
-const getCashRequestEligibility = async (req, res) => {
-  const { employee_id } = req.query
-  if (!employee_id)
-    return res.status(400).json({ message: 'Missing required query param: employee_id' })
-  try {
-    const blocked = await hasOutstandingLiquidation(employee_id)
-    return res.status(200).json({
-      eligible: !blocked,
-      message: blocked
-        ? 'You cannot create a new Cash Request until your previous Cash Request has been fully liquidated.'
-        : null,
-    })
-  } catch (error) {
-    console.error('Error in getCashRequestEligibility:', error)
-    return res.status(500).json({ message: 'Error checking eligibility' })
+/**
+ * True if the given fund has any UNLIQUIDATED cash_disbursement rows
+ * OTHER than the one currently being settled. Duplicated from
+ * cashDisbursementController.js — see that file's copy for full rationale.
+ */
+const hasOtherUnliquidatedDisbursements = async (fundId, excludeCdId) => {
+  const { sql, bindings } = SQL.model(Cash.Disbursement)
+    .select([Cash.Disbursement.cols.id])
+    .where(Cash.Disbursement.cols.revolving_fund_id, fundId)
+    .where(Cash.Disbursement.cols.status, 'UNLIQUIDATED')
+    .build()
+  const rows = await Query(sql, bindings)
+  return rows.some((r) => String(r.id) !== String(excludeCdId))
+}
+
+/**
+ * A cash voucher may back at most 2 cash_disbursement rows (issue row +
+ * one reimbursement row). Duplicated from cashDisbursementController.js
+ * so a Liquidation-driven reimbursement obeys the same limit as a manual
+ * one.
+ */
+const checkCashVoucherLimit = async (cashVoucher) => {
+  const { sql, bindings } = SQL.model(Cash.Disbursement)
+    .select([Cash.Disbursement.cols.id])
+    .where(Cash.Disbursement.cols.cash_voucher, cashVoucher)
+    .build()
+  const rows = await Query(sql, bindings)
+  return rows.length
+}
+
+// ==========================================
+// STATUS / MATH HELPERS
+// ==========================================
+
+const parseNum = (val, defaultVal = 0) => {
+  if (val === null || val === undefined) return defaultVal
+  const parsed = parseFloat(val)
+  return isNaN(parsed) ? defaultVal : parsed
+}
+
+const toTxQuery = ({ sql, bindings }) => ({ sql, values: bindings })
+
+const NON_ISSUABLE_RF_STATUSES = ['CLOSED', 'CLEARED', 'RETURN']
+
+const computeCdStatus = (issued, returned, expended) => {
+  const raw = parseNum(issued) - parseNum(returned) - parseNum(expended)
+  const outstanding = Math.max(0, Math.round(raw * 100) / 100)
+  const status = outstanding === 0 ? 'LIQUIDATED' : 'UNLIQUIDATED'
+  return { outstanding, status }
+}
+
+const computeRfStatus = (currentStatus, hasActivity) => {
+  if (currentStatus === 'CLOSED' || currentStatus === 'CLEARED' || currentStatus === 'RETURN') {
+    return currentStatus
   }
+  return hasActivity ? 'ON REVIEW' : currentStatus
+}
+
+/**
+ * Decides whether a CLOSED fund should auto-transition to CLEARED as part
+ * of this settlement. Duplicated from cashDisbursementController.js. Only
+ * ever fires CLOSED -> CLEARED.
+ */
+const resolveClosedFundStatus = async (
+  currentStatus,
+  newOutstanding,
+  fundId,
+  settlingCdId,
+  settlingCdNewStatus,
+) => {
+  if (currentStatus !== 'CLOSED') return currentStatus
+  if (newOutstanding > 0 || settlingCdNewStatus !== 'LIQUIDATED') return 'CLOSED'
+  const stillUnliquidated = await hasOtherUnliquidatedDisbursements(fundId, settlingCdId)
+  return stillUnliquidated ? 'CLOSED' : 'CLEARED'
+}
+
+/**
+ * l_id has no dedicated reference-id column (unlike cash_request's
+ * cr_reference_id) — derived rather than stored, to avoid inventing a
+ * migration for something purely cosmetic.
+ */
+const toReferenceId = (id) => `LQ-${String(id).padStart(6, '0')}`
+
+/** "A, B, or C" — used to phrase the allowed-status list in error messages. */
+const joinWithOr = (items) => {
+  if (items.length <= 1) return items.join('')
+  if (items.length === 2) return items.join(' or ')
+  return `${items.slice(0, -1).join(', ')}, or ${items[items.length - 1]}`
+}
+
+// ==========================================
+// WORKFLOW GUARDS
+// ==========================================
+
+const requireRole = (req, res, allowedRoles) => {
+  const role = req.userRole || req.user?.role
+  if (!role) {
+    console.warn(
+      `WARNING: role check skipped (no auth wired up yet) — endpoint requires one of [${allowedRoles.join(', ')}]`,
+    )
+    return true
+  }
+  if (!allowedRoles.includes(role)) {
+    res.status(403).json({
+      message: `This action requires one of the following roles: ${allowedRoles.join(', ')}.`,
+    })
+    return false
+  }
+  return true
+}
+
+/**
+ * Fetches a Liquidation by id and confirms it's in one of the statuses an
+ * action is allowed to run from. Centralizes the "missing id / not found /
+ * wrong status" boilerplate every workflow-transition endpoint below
+ * needs. On success returns the row; on failure it writes the response
+ * itself and returns null, so callers just do:
+ *
+ *   const lq = await loadLiquidationForAction(res, id, {...})
+ *   if (!lq) return
+ *
+ * `pastParticiple` is optional — omit it for actions (like reject) whose
+ * error message doesn't list the allowed statuses.
+ */
+const loadLiquidationForAction = async (
+  res,
+  id,
+  { allowedStatuses, infinitive, pastParticiple },
+) => {
+  if (!id) {
+    res.status(400).json({ message: 'Missing required field: id' })
+    return null
+  }
+  const lq = await getLiquidationById(id)
+  if (!lq) {
+    res.status(404).json({ message: 'Liquidation not found' })
+    return null
+  }
+  const status = lq[Liquidation.Liquidation.cols.status]
+  if (!allowedStatuses.includes(status)) {
+    const suffix = pastParticiple
+      ? ` Only ${joinWithOr(allowedStatuses)} liquidations can be ${pastParticiple}.`
+      : ''
+    res
+      .status(400)
+      .json({ message: `Cannot ${infinitive} a liquidation with status ${status}.${suffix}` })
+    return null
+  }
+  return lq
 }
 
 /**
  * Every liquidation_item column below is NOT NULL per the migration —
  * date, rt, store_name, particulars, from, to, mode_of_transportation_id,
- * amount. No optional fields at line level in this schema.
+ * amount. No optional fields at line level in this schema. (li_particulars
+ * is its own thing — an FK on liquidation_item — unrelated to
+ * cash_disbursement's purpose field; see insertReimbursementDisbursement's
+ * docstring below for why those two were previously confused.)
  */
 const validateItems = (items) => {
   if (!Array.isArray(items) || items.length === 0) {
@@ -206,6 +284,171 @@ const buildItemInsertData = (liquidationId, item) => ({
   [Liquidation.Item.cols.mode_of_transportation_id]: item.mode_of_transportation_id,
   [Liquidation.Item.cols.amount]: parseNum(item.amount),
 })
+
+// ==========================================
+// SETTLEMENT MATH (extracted from verifyLiquidation)
+// ==========================================
+
+/**
+ * Given what the Liquidation says was received/spent and the ORIGINAL
+ * Cash Disbursement's current totals, works out:
+ *   - expendedToPost: the plain-expense portion to post
+ *   - cashToReturn: unused cash coming back to the fund
+ *   - reimbursementOwed: cash owed to the Requester beyond what they
+ *     were given
+ * Return and Reimbursement are mutually exclusive by construction — one
+ * of the two is always exactly 0. Also returns the ORIGINAL disbursement's
+ * new expended/returned/outstanding/status after this settlement.
+ */
+const computeSettlementAmounts = (cashReceived, totalLiquidated, cd) => {
+  const currentIssued = parseNum(cd[Cash.Disbursement.cols.amount_issued])
+  const currentReturned = parseNum(cd[Cash.Disbursement.cols.amount_returned])
+  const currentExpended = parseNum(cd[Cash.Disbursement.cols.amount_expended])
+
+  const expendedToPost = Math.min(totalLiquidated, currentIssued - currentReturned)
+  const cashToReturn = Math.max(0, cashReceived - totalLiquidated)
+  const reimbursementOwed = Math.max(0, totalLiquidated - cashReceived)
+
+  const newExpended = currentExpended + expendedToPost
+  const newReturned = currentReturned + cashToReturn
+  const { outstanding: newOutstanding, status: newCdStatus } = computeCdStatus(
+    currentIssued,
+    newReturned,
+    newExpended,
+  )
+
+  return {
+    totalLiquidated,
+    expendedToPost,
+    cashToReturn,
+    reimbursementOwed,
+    newExpended,
+    newReturned,
+    newOutstanding,
+    newCdStatus,
+  }
+}
+
+// ==========================================
+// SETTLEMENT MATH (replaces computeFundSettlement)
+// ==========================================
+
+/**
+ * Splits a settlement into its two independent effects:
+ *   - `original`: the AR being settled (outstanding/expended/liquidated)
+ *     — ALWAYS applied to the disbursement's own original fund,
+ *     regardless of that fund's status. Mirrors
+ *     recordExpendedCashDisbursement's "no status guard" behavior.
+ *   - `target`: the physical cash movement (Return landing + any
+ *     Reimbursement issued) — applied to the SELECTED fund, which
+ *     defaults to the original fund but may be redirected to a
+ *     different, active fund. Mirrors returnCashDisbursement/
+ *     reimburseCashDisbursement's fund-selection pattern.
+ * When original and target are the same fund, both delta sets are
+ * summed onto ONE row (see verifyLiquidation) and reproduce the old
+ * single-fund computeFundSettlement math exactly.
+ */
+const computeSettlementDeltas = (settlement) => {
+  const { expendedToPost, cashToReturn, reimbursementOwed } = settlement
+  return {
+    original: {
+      outstandingDelta: -(expendedToPost + cashToReturn),
+      expendedDelta: expendedToPost,
+      liquidatedDelta: expendedToPost + cashToReturn,
+    },
+    target: {
+      returnedDelta: cashToReturn,
+      balanceDelta: cashToReturn - reimbursementOwed,
+      issuedDelta: reimbursementOwed,
+      expendedDelta: reimbursementOwed,
+      liquidatedDelta: reimbursementOwed,
+    },
+  }
+}
+
+/** Applies a delta set (see computeSettlementDeltas) onto a fund row's current values. */
+const applyFundDeltas = (fund, deltas) => ({
+  issued: parseNum(fund[Revolving.Fund.cols.issued]) + (deltas.issuedDelta || 0),
+  returned: parseNum(fund[Revolving.Fund.cols.returned]) + (deltas.returnedDelta || 0),
+  expended: parseNum(fund[Revolving.Fund.cols.amount_expended]) + (deltas.expendedDelta || 0),
+  liquidated: parseNum(fund[Revolving.Fund.cols.liquidated]) + (deltas.liquidatedDelta || 0),
+  balance: parseNum(fund[Revolving.Fund.cols.balance]) + (deltas.balanceDelta || 0),
+  outstanding: Math.max(
+    0,
+    parseNum(fund[Revolving.Fund.cols.outstanding]) + (deltas.outstandingDelta || 0),
+  ),
+})
+
+/**
+ * A Reimbursement pulls NEW cash out of the fund's own balance — same
+ * eligibility rules as a fresh issue (issueCashDisbursement/
+ * reimburseCashDisbursement). Returns an error message, or null if the
+ * fund can accept it. A plain Return needs no such guard — crediting
+ * unused cash back is always allowed, even against a CLOSED fund.
+ */
+const checkReimbursementEligibility = (rf, reimbursementOwed) => {
+  if (reimbursementOwed <= 0) return null
+  const status = rf[Revolving.Fund.cols.status]
+  if (NON_ISSUABLE_RF_STATUSES.includes(status)) {
+    return `Cannot post reimbursement — the revolving fund has status ${status}.`
+  }
+  if (parseNum(rf[Revolving.Fund.cols.balance]) < reimbursementOwed) {
+    return 'Insufficient revolving fund balance to cover the reimbursement.'
+  }
+  return null
+}
+
+/**
+ * Posts the Reimbursement's own excess as a brand-new, immediately
+ * LIQUIDATED cash_disbursement row against the same fund the original
+ * disbursement drew from — identical shape to reimburseCashDisbursement
+ * in cashDisbursementController.js, sharing the original's cash_voucher
+ * (the "issue row + one reimbursement row per voucher" pairing
+ * checkCashVoucherLimit exists to allow).
+ *
+ * cd_purpose is plain free text (copied straight from the original
+ * disbursement, no lookup) — cash_disbursement no longer has a
+ * particulars FK/master_particulars lookup at all (that was dropped in
+ * favor of this free-text purpose field; li_particulars on
+ * liquidation_item is a separate, still-FK column and is unaffected).
+ * Using `Cash.Disbursement.cols.particulars` here was the bug: that key
+ * no longer exists on the model, so `cd[undefined]` produced `undefined`
+ * as the value AND `[undefined]` as the object key, which the query
+ * builder rendered as the literal column name `cd_undefined`.
+ *
+ * NOT linked via cash_request_id (that column is 1:1 with the original
+ * disbursement elsewhere in this codebase) — traceability lives in its
+ * activity-log remarks and shared voucher instead. Standalone insert
+ * because its generated id feeds its own activity insert and
+ * Transaction() can't return generated ids mid-batch.
+ */
+const insertReimbursementDisbursement = async (cd, rfId, reimbursementOwed) => {
+  const { sql, bindings } = SQL.model(Cash.Disbursement)
+    .insert({
+      [Cash.Disbursement.cols.date_issued]: new Date(),
+      [Cash.Disbursement.cols.received_by]: cd[Cash.Disbursement.cols.received_by],
+      [Cash.Disbursement.cols.revolving_fund_id]: rfId,
+      [Cash.Disbursement.cols.department_id]: cd[Cash.Disbursement.cols.department_id],
+      [Cash.Disbursement.cols.purpose]: cd[Cash.Disbursement.cols.purpose],
+      [Cash.Disbursement.cols.amount_issued]: reimbursementOwed,
+      [Cash.Disbursement.cols.cash_voucher]: cd[Cash.Disbursement.cols.cash_voucher],
+      [Cash.Disbursement.cols.amount_returned]: 0,
+      [Cash.Disbursement.cols.outstanding_amount]: 0,
+      [Cash.Disbursement.cols.amount_expended]: reimbursementOwed,
+      [Cash.Disbursement.cols.status]: 'LIQUIDATED',
+    })
+    .build()
+  const result = await Query(sql, bindings)
+  return result.insertId
+}
+
+const deleteDisbursement = async (cdId) => {
+  const { sql, bindings } = SQL.model(Cash.Disbursement)
+    .delete()
+    .where(Cash.Disbursement.pk, cdId)
+    .build()
+  await Query(sql, bindings)
+}
 
 // ==========================================
 // WORKFLOW: CREATE (Requester) -> PENDING
@@ -349,38 +592,31 @@ const createLiquidation = async (req, res) => {
  *              currently CANNOT, unwind or reapply the already-settled
  *              cash_disbursement/revolving_fund changes — resubmitting
  *              such a liquidation will hit verifyLiquidation's
- *              already-LIQUIDATED guard and be rejected. See that
- *              function's docstring for the full explanation; this is a
- *              known workflow gap flagged for a product decision, not
- *              something silently handled here.
+ *              already-LIQUIDATED guard and be rejected. Known workflow
+ *              gap flagged for a product decision, not silently handled.
  */
 const updateLiquidation = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
   const { id, description, receipt, items } = req.body
 
-  if (!id) return res.status(400).json({ message: 'Missing required field: id' })
-
   const itemError = items !== undefined ? validateItems(items) : null
   if (itemError) return res.status(400).json({ message: itemError })
 
+  const lq = await loadLiquidationForAction(res, id, {
+    allowedStatuses: ['PENDING', 'REJECTED', 'INCOMPLETE'],
+    infinitive: 'edit',
+    pastParticiple: 'edited',
+  })
+  if (!lq) return
+
   try {
-    const lq = await getLiquidationById(id)
-    if (!lq) return res.status(404).json({ message: 'Liquidation not found' })
-
     const currentStatus = lq[Liquidation.Liquidation.cols.status]
-    if (!['PENDING', 'REJECTED', 'INCOMPLETE'].includes(currentStatus)) {
-      return res.status(400).json({
-        message: `Cannot edit a liquidation with status ${currentStatus}. Only PENDING, REJECTED, or INCOMPLETE liquidations can be edited.`,
-      })
-    }
-
     const updateData = { [Liquidation.Liquidation.cols.status]: 'PENDING' }
     if (description !== undefined)
       updateData[Liquidation.Liquidation.cols.description] = description
 
-    let totalExpended = parseNum(lq[Liquidation.Liquidation.cols.amount_expended])
     if (items !== undefined) {
-      totalExpended = sumItemAmounts(items)
+      const totalExpended = sumItemAmounts(items)
       updateData[Liquidation.Liquidation.cols.amount_expended] = totalExpended
       const cashObtained = parseNum(lq[Liquidation.Liquidation.cols.amount_obtained])
       updateData[Liquidation.Liquidation.cols.reimburse_return] =
@@ -453,18 +689,15 @@ const approveLiquidation = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
   const { id, remarks } = req.body
 
-  if (!id) return res.status(400).json({ message: 'Missing required field: id' })
   if (!requireRole(req, res, ['TEAM_LEAD', 'ADMIN'])) return
+  const lq = await loadLiquidationForAction(res, id, {
+    allowedStatuses: ['PENDING'],
+    infinitive: 'approve',
+    pastParticiple: 'approved',
+  })
+  if (!lq) return
 
   try {
-    const lq = await getLiquidationById(id)
-    if (!lq) return res.status(404).json({ message: 'Liquidation not found' })
-    if (lq[Liquidation.Liquidation.cols.status] !== 'PENDING') {
-      return res.status(400).json({
-        message: `Cannot approve a liquidation with status ${lq[Liquidation.Liquidation.cols.status]}. Only PENDING liquidations can be approved.`,
-      })
-    }
-
     const updateQuery = SQL.model(Liquidation.Liquidation)
       .update({ [Liquidation.Liquidation.cols.status]: 'APPROVED' })
       .where(Liquidation.Liquidation.pk, id)
@@ -497,34 +730,32 @@ const approveLiquidation = async (req, res) => {
  *              from PENDING (Team Leader declining) or APPROVED (Fund
  *              Custodian declining before verifying/settling). Never from
  *              VERIFIED — by then the Cash Disbursement/Revolving Fund
- *              have already been settled by verifyLiquidation, so a plain
- *              rejection no longer makes sense at that point (see
- *              markLiquidationIncomplete for the equivalent at that
- *              stage). No financial effect either way — the money hasn't
- *              moved yet at PENDING/APPROVED.
+ *              have already been settled (see markLiquidationIncomplete
+ *              for the equivalent at that stage). No financial effect
+ *              either way — the money hasn't moved yet at PENDING/APPROVED.
  */
 const rejectLiquidation = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
   const { id, remarks } = req.body
 
-  if (!id) return res.status(400).json({ message: 'Missing required field: id' })
   if (!remarks)
     return res
       .status(400)
       .json({ message: 'Missing required field: remarks (reason for rejection)' })
   if (!requireRole(req, res, ['TEAM_LEAD', 'FUND_CUSTODIAN', 'ADMIN'])) return
 
+  const lq = await loadLiquidationForAction(res, id, {
+    allowedStatuses: ['PENDING', 'APPROVED'],
+    infinitive: 'reject',
+  })
+  if (!lq) return
+
   try {
-    const lq = await getLiquidationById(id)
-    if (!lq) return res.status(404).json({ message: 'Liquidation not found' })
-
     const currentStatus = lq[Liquidation.Liquidation.cols.status]
-    if (!['PENDING', 'APPROVED'].includes(currentStatus)) {
-      return res
-        .status(400)
-        .json({ message: `Cannot reject a liquidation with status ${currentStatus}.` })
-    }
-
+    // PENDING = still with the Team Leader. APPROVED = Team-Lead-approved,
+    // now with the Fund Custodian. This is the only reliable, no-migration
+    // way to know who was rejecting, since l_status doesn't retain it
+    // after the flip to REJECTED.
     const rejectingStage = currentStatus === 'PENDING' ? 'Team Leader' : 'Fund Custodian'
     const prefixedRemarks = `Rejected by ${rejectingStage}: ${remarks}`
 
@@ -552,54 +783,48 @@ const rejectLiquidation = async (req, res) => {
 
 // ==========================================
 // WORKFLOW: FUND CUSTODIAN VERIFY (APPROVED -> VERIFIED)
-// THIS is now where settlement actually happens.
+// THIS is where settlement actually happens.
 // ==========================================
 
 /**
  * @name verifyLiquidation
- * @description Fund Custodian's verification. THIS is now the step that
- *              actually settles the money — moved here from
- *              completeLiquidation, which is now a pure post-audit status
- *              flip with no financial effect (see that function's
- *              docstring). Mirrors the settlement cascade the old
- *              completeLiquidation used to run: posts the liquidated
- *              amount against the Cash Disbursement (expended/returned/
- *              outstanding/status), and cascades to the Revolving Fund
- *              (liquidated/expended/balance/outstanding/status).
+ * @description Fund Custodian's verification — settles the money.
  *
- *              Idempotency guard: refuses to settle a Cash Disbursement
- *              that's already LIQUIDATED. This matters because a
- *              liquidation CAN legally return to VERIFIED's precondition
- *              (APPROVED) a second time — e.g. PENDING -> APPROVED ->
- *              VERIFIED -> (Finance) INCOMPLETE -> (Requester edits,
- *              resets to PENDING) -> APPROVED again. Without this guard,
- *              a second verify would double-apply the settlement math
- *              against an already-settled disbursement. With it, that
- *              second verify attempt is correctly refused — which means,
- *              as currently designed, a liquidation that reaches
- *              INCOMPLETE after having been verified CANNOT actually be
- *              re-verified. That's a known workflow gap: reversing an
- *              already-settled disbursement/fund is a materially
- *              different feature (undoing specific deltas, not re-running
- *              forward math) that hasn't been built. Flagging it here
- *              rather than silently allowing double-settlement.
+ *              Fund selection: `revolving_fund_id` in the body is the
+ *              SELECTED/target fund that will actually receive any Cash
+ *              to Return and/or fund any Reimbursement — defaults to the
+ *              ORIGINAL disbursement's own fund when omitted. Mirrors
+ *              returnCashDisbursement/reimburseCashDisbursement: the
+ *              ORIGINAL fund (cash_disbursement.revolving_fund_id) never
+ *              changes and always owns the AR being settled here — even
+ *              if it's since gone CLOSED, since CLOSED alone must never
+ *              block a liquidation — but the physical cash can be
+ *              redirected to a different, active fund. When original and
+ *              selected are the same fund (the common case), both
+ *              effects land on the same row, identical to the old
+ *              single-fund behavior.
+ *
+ *              If settling actually needs to move cash (Cash to Return
+ *              and/or Reimbursement) and the selected fund is CLOSED (or,
+ *              for a Reimbursement, CLOSED/CLEARED/RETURN or under-
+ *              funded — see checkReimbursementEligibility), the request
+ *              is rejected so the caller can resubmit with a different
+ *              revolving_fund_id. A "Fully Liquidated" settlement (no
+ *              Return, no Reimbursement) needs no fund selection at all.
  */
 const verifyLiquidation = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
-  const { id, remarks } = req.body
+  const { id, remarks, revolving_fund_id } = req.body
 
-  if (!id) return res.status(400).json({ message: 'Missing required field: id' })
   if (!requireRole(req, res, ['FUND_CUSTODIAN', 'ADMIN'])) return
+  const lq = await loadLiquidationForAction(res, id, {
+    allowedStatuses: ['APPROVED'],
+    infinitive: 'verify',
+    pastParticiple: 'verified',
+  })
+  if (!lq) return
 
   try {
-    const lq = await getLiquidationById(id)
-    if (!lq) return res.status(404).json({ message: 'Liquidation not found' })
-    if (lq[Liquidation.Liquidation.cols.status] !== 'APPROVED') {
-      return res.status(400).json({
-        message: `Cannot verify a liquidation with status ${lq[Liquidation.Liquidation.cols.status]}. Only APPROVED liquidations can be verified.`,
-      })
-    }
-
     const cashRequestId = lq[Liquidation.Liquidation.cols.cash_request_id]
     const cd = await getDisbursementByCashRequestId(cashRequestId)
     if (!cd) return res.status(404).json({ message: 'Associated cash disbursement not found' })
@@ -612,36 +837,103 @@ const verifyLiquidation = async (req, res) => {
 
     const cashReceived = parseNum(lq[Liquidation.Liquidation.cols.amount_obtained])
     const totalLiquidated = parseNum(lq[Liquidation.Liquidation.cols.amount_expended])
-    const currentIssued = parseNum(cd[Cash.Disbursement.cols.amount_issued])
-    const currentReturned = parseNum(cd[Cash.Disbursement.cols.amount_returned])
-
-    const expendedToPost = Math.min(totalLiquidated, currentIssued - currentReturned)
-    const cashToReturn = Math.max(0, cashReceived - totalLiquidated)
-    const reimbursementOwed = Math.max(0, totalLiquidated - cashReceived)
-
-    const newExpended = parseNum(cd[Cash.Disbursement.cols.amount_expended]) + expendedToPost
-    const newReturned = currentReturned + cashToReturn
-    const { outstanding: newOutstanding, status: newCdStatus } = computeCdStatus(
-      currentIssued,
-      newReturned,
+    const settlement = computeSettlementAmounts(cashReceived, totalLiquidated, cd)
+    const {
+      expendedToPost,
+      cashToReturn,
+      reimbursementOwed,
       newExpended,
-    )
-
-    const rfId = cd[Cash.Disbursement.cols.revolving_fund_id]
-    const rf = await getRevolvingFundById(rfId)
-    if (!rf) return res.status(404).json({ message: 'Associated revolving fund not found' })
-
-    const newRfLiquidated =
-      parseNum(rf[Revolving.Fund.cols.liquidated]) + expendedToPost + cashToReturn
-    const newRfExpended = parseNum(rf[Revolving.Fund.cols.amount_expended]) + expendedToPost
-    const newRfBalance = parseNum(rf[Revolving.Fund.cols.balance]) + cashToReturn
-    const newRfOutstanding = Math.max(
-      0,
-      parseNum(rf[Revolving.Fund.cols.outstanding]) - expendedToPost - cashToReturn,
-    )
-    const newRfStatus = computeRfStatus(rf[Revolving.Fund.cols.status], true)
+      newReturned,
+      newOutstanding,
+      newCdStatus,
+    } = settlement
 
     const cdId = cd[Cash.Disbursement.cols.id]
+    const cdPurpose = cd[Cash.Disbursement.cols.purpose]
+    const originalFundId = cd[Cash.Disbursement.cols.revolving_fund_id]
+    const targetFundId = revolving_fund_id || originalFundId
+    const isCrossFund = String(targetFundId) !== String(originalFundId)
+
+    const originalFund = await getRevolvingFundById(originalFundId)
+    if (!originalFund)
+      return res.status(404).json({ message: 'Associated revolving fund not found' })
+
+    const targetFund = isCrossFund ? await getRevolvingFundById(targetFundId) : originalFund
+    if (!targetFund) return res.status(404).json({ message: 'Selected revolving fund not found' })
+
+    // A plain Return, like returnCashDisbursement, only ever blocks a
+    // CLOSED target explicitly. A Reimbursement additionally goes through
+    // checkReimbursementEligibility (CLOSED/CLEARED/RETURN + balance).
+    const movesCash = cashToReturn > 0 || reimbursementOwed > 0
+    if (movesCash && targetFund[Revolving.Fund.cols.status] === 'CLOSED') {
+      return res.status(400).json({
+        message:
+          'Cannot settle Cash to Return / Reimbursement against a closed revolving fund — select a different fund.',
+      })
+    }
+
+    const eligibilityError = checkReimbursementEligibility(targetFund, reimbursementOwed)
+    if (eligibilityError) return res.status(400).json({ message: eligibilityError })
+
+    const originalCashVoucher = cd[Cash.Disbursement.cols.cash_voucher]
+    if (reimbursementOwed > 0) {
+      const voucherCount = await checkCashVoucherLimit(originalCashVoucher)
+      if (voucherCount >= 2) {
+        return res.status(400).json({
+          message: `Cash voucher '${originalCashVoucher}' already has 2 associated disbursements — cannot post an additional reimbursement.`,
+        })
+      }
+    }
+
+    const deltas = computeSettlementDeltas(settlement)
+
+    const originalStatus = originalFund[Revolving.Fund.cols.status]
+    const newOriginalFields = applyFundDeltas(originalFund, deltas.original)
+    const newOriginalStatus =
+      originalStatus === 'CLOSED'
+        ? await resolveClosedFundStatus(
+            originalStatus,
+            newOriginalFields.outstanding,
+            originalFundId,
+            cdId,
+            newCdStatus,
+          )
+        : computeRfStatus(originalStatus, true)
+    const didAutoClear = originalStatus === 'CLOSED' && newOriginalStatus === 'CLEARED'
+
+    let newTargetFields
+    let newTargetStatus
+    if (!isCrossFund) {
+      // Same row — sum both delta sets before applying once, so neither
+      // write stomps the other. Reproduces the old single-fund math.
+      newTargetFields = applyFundDeltas(targetFund, {
+        outstandingDelta: deltas.original.outstandingDelta,
+        expendedDelta: deltas.original.expendedDelta + deltas.target.expendedDelta,
+        liquidatedDelta: deltas.original.liquidatedDelta + deltas.target.liquidatedDelta,
+        returnedDelta: deltas.target.returnedDelta,
+        balanceDelta: deltas.target.balanceDelta,
+        issuedDelta: deltas.target.issuedDelta,
+      })
+      newTargetStatus = newOriginalStatus
+    } else {
+      newTargetFields = applyFundDeltas(targetFund, deltas.target)
+      newTargetStatus = computeRfStatus(
+        targetFund[Revolving.Fund.cols.status],
+        parseNum(targetFund[Revolving.Fund.cols.issued]) > 0 ||
+          deltas.target.returnedDelta > 0 ||
+          deltas.target.issuedDelta > 0,
+      )
+    }
+
+    const referenceId = toReferenceId(id)
+
+    // Standalone insert first — its generated id feeds its own activity
+    // insert below, and Transaction() can't return generated ids mid-batch.
+    let reimbursementCdId = null
+    if (reimbursementOwed > 0) {
+      reimbursementCdId = await insertReimbursementDisbursement(cd, targetFundId, reimbursementOwed)
+    }
+
     const queries = [
       toTxQuery(
         SQL.model(Cash.Disbursement)
@@ -660,23 +952,90 @@ const verifyLiquidation = async (req, res) => {
             [Cash.DisbursementActivity.cols.cash_disbursement_id]: cdId,
             [Cash.DisbursementActivity.cols.amount]: totalLiquidated,
             [Cash.DisbursementActivity.cols.remarks]:
-              `Settled via Liquidation ${toReferenceId(id)} (verified by Fund Custodian) — expended ₱${expendedToPost.toFixed(2)}, returned ₱${cashToReturn.toFixed(2)}.`,
-            [Cash.DisbursementActivity.cols.particulars]: 'Liquidation Settlement',
+              `Settled via Liquidation ${referenceId} (verified by Fund Custodian) — expended ₱${expendedToPost.toFixed(2)}, returned ₱${cashToReturn.toFixed(2)}${isCrossFund ? ` (credited to Fund #${targetFundId})` : ''}.`,
+            [Cash.DisbursementActivity.cols.purpose]: cdPurpose,
           })
           .build(),
       ),
-      toTxQuery(
-        SQL.model(Revolving.Fund)
-          .update({
-            [Revolving.Fund.cols.liquidated]: newRfLiquidated,
-            [Revolving.Fund.cols.amount_expended]: newRfExpended,
-            [Revolving.Fund.cols.balance]: newRfBalance,
-            [Revolving.Fund.cols.outstanding]: newRfOutstanding,
-            [Revolving.Fund.cols.status]: newRfStatus,
-          })
-          .where(Revolving.Fund.pk, rfId)
-          .build(),
-      ),
+    ]
+
+    if (!isCrossFund) {
+      queries.push(
+        toTxQuery(
+          SQL.model(Revolving.Fund)
+            .update({
+              [Revolving.Fund.cols.issued]: newTargetFields.issued,
+              [Revolving.Fund.cols.returned]: newTargetFields.returned,
+              [Revolving.Fund.cols.amount_expended]: newTargetFields.expended,
+              [Revolving.Fund.cols.liquidated]: newTargetFields.liquidated,
+              [Revolving.Fund.cols.balance]: newTargetFields.balance,
+              [Revolving.Fund.cols.outstanding]: newTargetFields.outstanding,
+              [Revolving.Fund.cols.status]: newTargetStatus,
+            })
+            .where(Revolving.Fund.pk, originalFundId)
+            .build(),
+        ),
+        toTxQuery(
+          SQL.model(Revolving.FundActivity)
+            .insert({
+              [Revolving.FundActivity.cols.revolving_fund_id]: originalFundId,
+              [Revolving.FundActivity.cols.remarks]: didAutoClear
+                ? `Liquidation ${referenceId} fully settled this fund's outstanding — no remaining unliquidated disbursements. Status: CLOSED → CLEARED.`
+                : `Liquidation ${referenceId} settled — expended ₱${expendedToPost.toFixed(2)}, returned ₱${cashToReturn.toFixed(2)}${reimbursementOwed > 0 ? `, reimbursed ₱${reimbursementOwed.toFixed(2)}` : ''} — issued (${newTargetFields.issued}), balance (${newTargetFields.balance}), outstanding (${newTargetFields.outstanding}), status: ${newTargetStatus}.`,
+              [Revolving.FundActivity.cols.user_id]: userId,
+            })
+            .build(),
+        ),
+      )
+    } else {
+      queries.push(
+        toTxQuery(
+          SQL.model(Revolving.Fund)
+            .update({
+              [Revolving.Fund.cols.outstanding]: newOriginalFields.outstanding,
+              [Revolving.Fund.cols.amount_expended]: newOriginalFields.expended,
+              [Revolving.Fund.cols.liquidated]: newOriginalFields.liquidated,
+              [Revolving.Fund.cols.status]: newOriginalStatus,
+            })
+            .where(Revolving.Fund.pk, originalFundId)
+            .build(),
+        ),
+        toTxQuery(
+          SQL.model(Revolving.Fund)
+            .update({
+              [Revolving.Fund.cols.issued]: newTargetFields.issued,
+              [Revolving.Fund.cols.returned]: newTargetFields.returned,
+              [Revolving.Fund.cols.balance]: newTargetFields.balance,
+              [Revolving.Fund.cols.status]: newTargetStatus,
+            })
+            .where(Revolving.Fund.pk, targetFundId)
+            .build(),
+        ),
+        toTxQuery(
+          SQL.model(Revolving.FundActivity)
+            .insert({
+              [Revolving.FundActivity.cols.revolving_fund_id]: originalFundId,
+              [Revolving.FundActivity.cols.remarks]: didAutoClear
+                ? `Liquidation ${referenceId} fully settled via cash credited to Fund #${targetFundId} — no remaining unliquidated disbursements. Status: CLOSED → CLEARED.`
+                : `Liquidation ${referenceId} settled — expended ₱${expendedToPost.toFixed(2)}, return/reimbursement credited to Fund #${targetFundId} — outstanding (${newOriginalFields.outstanding}), liquidated (${newOriginalFields.liquidated}), status: ${newOriginalStatus}.`,
+              [Revolving.FundActivity.cols.user_id]: userId,
+            })
+            .build(),
+        ),
+        toTxQuery(
+          SQL.model(Revolving.FundActivity)
+            .insert({
+              [Revolving.FundActivity.cols.revolving_fund_id]: targetFundId,
+              [Revolving.FundActivity.cols.remarks]:
+                `Received settlement for Liquidation ${referenceId} originally issued from Fund #${originalFundId} — returned ₱${cashToReturn.toFixed(2)}${reimbursementOwed > 0 ? `, reimbursed ₱${reimbursementOwed.toFixed(2)}` : ''} — issued (${newTargetFields.issued}), balance (${newTargetFields.balance}), status: ${newTargetStatus}.`,
+              [Revolving.FundActivity.cols.user_id]: userId,
+            })
+            .build(),
+        ),
+      )
+    }
+
+    queries.push(
       toTxQuery(
         SQL.model(Liquidation.Liquidation)
           .update({ [Liquidation.Liquidation.cols.status]: 'VERIFIED' })
@@ -696,15 +1055,47 @@ const verifyLiquidation = async (req, res) => {
           })
           .build(),
       ),
-    ]
+    )
 
-    await Transaction(queries)
+    if (reimbursementCdId) {
+      queries.push(
+        toTxQuery(
+          SQL.model(Cash.DisbursementActivity)
+            .insert({
+              [Cash.DisbursementActivity.cols.cash_disbursement_id]: reimbursementCdId,
+              [Cash.DisbursementActivity.cols.amount]: reimbursementOwed,
+              [Cash.DisbursementActivity.cols.remarks]:
+                `Reimbursement for Liquidation ${referenceId} — Cash Request #${cashRequestId}, original Disbursement #${cdId}: ₱${reimbursementOwed.toFixed(2)} spent beyond the amount originally received.`,
+              [Cash.DisbursementActivity.cols.purpose]: cdPurpose,
+            })
+            .build(),
+        ),
+      )
+    }
+
+    try {
+      await Transaction(queries)
+    } catch (txError) {
+      if (reimbursementCdId) {
+        try {
+          await deleteDisbursement(reimbursementCdId)
+        } catch (compensationError) {
+          console.error(
+            `CRITICAL: failed to compensate orphaned reimbursement cash_disbursement id ${reimbursementCdId} after transaction failure:`,
+            compensationError,
+          )
+        }
+      }
+      throw txError
+    }
 
     return res.status(200).json({
       message: 'Liquidation verified successfully — cash disbursement settled.',
       cash_disbursement_status: newCdStatus,
       cash_to_return: cashToReturn,
       reimbursement_owed: reimbursementOwed,
+      reimbursement_cash_disbursement_id: reimbursementCdId,
+      revolving_fund_id: targetFundId,
     })
   } catch (error) {
     console.error('Error in verifyLiquidation:', error)
@@ -714,38 +1105,31 @@ const verifyLiquidation = async (req, res) => {
 
 // ==========================================
 // WORKFLOW: FINANCE POST-AUDIT (VERIFIED -> COMPLETED)
-// No financial effect anymore — settlement already happened at VERIFIED.
+// No financial effect — settlement already happened at VERIFIED.
 // ==========================================
 
 /**
  * @name completeLiquidation
  * @description Finance's post-audit sign-off. Settlement has ALREADY
- *              happened by this point (see verifyLiquidation) — this is
- *              now a pure record-keeping status flip with NO effect on
- *              Cash Disbursement or Revolving Fund. Kept as a separate
- *              stage (rather than folding into verifyLiquidation) because
- *              Finance's review is conceptually a compliance/audit check
- *              on paperwork that already-moved money, not a financial
- *              gate — matching the stated intent that Finance acts like a
- *              post-auditor, not a second approver of the transaction
- *              itself.
+ *              happened by this point (see verifyLiquidation) — pure
+ *              record-keeping status flip, no effect on Cash Disbursement
+ *              or Revolving Fund. Kept as a separate stage because
+ *              Finance's review is a compliance/audit check on paperwork
+ *              that already-moved money, not a financial gate.
  */
 const completeLiquidation = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
   const { id, remarks } = req.body
 
-  if (!id) return res.status(400).json({ message: 'Missing required field: id' })
   if (!requireRole(req, res, ['FINANCE', 'ADMIN'])) return
+  const lq = await loadLiquidationForAction(res, id, {
+    allowedStatuses: ['VERIFIED'],
+    infinitive: 'complete',
+    pastParticiple: 'completed',
+  })
+  if (!lq) return
 
   try {
-    const lq = await getLiquidationById(id)
-    if (!lq) return res.status(404).json({ message: 'Liquidation not found' })
-    if (lq[Liquidation.Liquidation.cols.status] !== 'VERIFIED') {
-      return res.status(400).json({
-        message: `Cannot complete a liquidation with status ${lq[Liquidation.Liquidation.cols.status]}. Only VERIFIED liquidations can be completed.`,
-      })
-    }
-
     const updateQuery = SQL.model(Liquidation.Liquidation)
       .update({ [Liquidation.Liquidation.cols.status]: 'COMPLETED' })
       .where(Liquidation.Liquidation.pk, id)
@@ -773,39 +1157,36 @@ const completeLiquidation = async (req, res) => {
 
 /**
  * @name markLiquidationIncomplete
- * @description Finance flags a VERIFIED liquidation for correction
- *              during post-audit, without treating it as a rejection.
- *              la_action has no INCOMPLETE value, so this reuses REJECTED
- *              with a distinguishing remarks prefix — same technique as
+ * @description Finance flags a VERIFIED liquidation for correction during
+ *              post-audit, without treating it as a rejection. l_action
+ *              has no INCOMPLETE value, so this reuses REJECTED with a
+ *              distinguishing remarks prefix — same technique as
  *              rejectLiquidation's stage prefix.
  *
  *              IMPORTANT: does NOT reverse the Cash Disbursement/Revolving
  *              Fund settlement — that already happened at verifyLiquidation
- *              and this function has no way to undo it (see
- *              verifyLiquidation's docstring on the resubmit/re-verify
- *              dead end this creates). Use this for flagging a
- *              documentation/paperwork issue on an already-settled
- *              liquidation, not for cases where the settled amounts
- *              themselves need to change.
+ *              and this function has no way to undo it (see that
+ *              function's docstring on the resubmit/re-verify dead end
+ *              this creates). Use for a documentation/paperwork issue on
+ *              an already-settled liquidation, not for cases where the
+ *              settled amounts themselves need to change.
  */
 const markLiquidationIncomplete = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
   const { id, remarks } = req.body
 
-  if (!id) return res.status(400).json({ message: 'Missing required field: id' })
   if (!remarks)
     return res.status(400).json({ message: 'Missing required field: remarks (what is incomplete)' })
   if (!requireRole(req, res, ['FINANCE', 'ADMIN'])) return
 
-  try {
-    const lq = await getLiquidationById(id)
-    if (!lq) return res.status(404).json({ message: 'Liquidation not found' })
-    if (lq[Liquidation.Liquidation.cols.status] !== 'VERIFIED') {
-      return res.status(400).json({
-        message: `Cannot mark incomplete a liquidation with status ${lq[Liquidation.Liquidation.cols.status]}. Only VERIFIED liquidations can be marked incomplete.`,
-      })
-    }
+  const lq = await loadLiquidationForAction(res, id, {
+    allowedStatuses: ['VERIFIED'],
+    infinitive: 'mark incomplete',
+    pastParticiple: 'marked incomplete',
+  })
+  if (!lq) return
 
+  try {
     const updateQuery = SQL.model(Liquidation.Liquidation)
       .update({ [Liquidation.Liquidation.cols.status]: 'INCOMPLETE' })
       .where(Liquidation.Liquidation.pk, id)
@@ -832,6 +1213,24 @@ const markLiquidationIncomplete = async (req, res) => {
 // READ ENDPOINTS (joined to cash_request since employee/department/
 // reference aren't stored on liquidation itself)
 // ==========================================
+
+const getCashRequestEligibility = async (req, res) => {
+  const { employee_id } = req.query
+  if (!employee_id)
+    return res.status(400).json({ message: 'Missing required query param: employee_id' })
+  try {
+    const blocked = await hasOutstandingLiquidation(employee_id)
+    return res.status(200).json({
+      eligible: !blocked,
+      message: blocked
+        ? 'You cannot create a new Cash Request until your previous Cash Request has been fully liquidated.'
+        : null,
+    })
+  } catch (error) {
+    console.error('Error in getCashRequestEligibility:', error)
+    return res.status(500).json({ message: 'Error checking eligibility' })
+  }
+}
 
 const getLiquidation = async (req, res) => {
   const { status, employee_id, cash_request_id } = req.query

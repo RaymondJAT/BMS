@@ -55,14 +55,8 @@ module.exports = {
         onDelete: 'RESTRICT',
         allowNull: false,
       },
-      cd_particulars: {
-        type: Sequelize.INTEGER,
-        references: {
-          model: 'master_particulars',
-          key: 'mpt_id',
-        },
-        onUpdate: 'CASCADE',
-        onDelete: 'RESTRICT',
+      cd_purpose: {
+        type: Sequelize.TEXT,
         allowNull: false,
       },
       cd_amount_issued: {

@@ -72,7 +72,8 @@ export function useLiquidations({ role, ...initialParams } = {}) {
     [runMutation],
   )
   const verifyLiquidation = useCallback(
-    (id, payload = {}) => runMutation(liquidationApi.verify, { id, ...payload }),
+    (id, payload = {}) =>
+      runMutation(liquidationApi.verify, { id, ...payload }, { invalidateFinancial: true }),
     [runMutation],
   )
   const completeLiquidation = useCallback(
