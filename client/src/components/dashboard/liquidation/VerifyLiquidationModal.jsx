@@ -13,9 +13,10 @@ export default function VerifyLiquidationModal({
   isSubmitting,
   getEmployeeName,
   receipt,
-  revolvingFunds = [], // eligible (non-CLOSED) funds to settle against
-  originalFundId, // the disbursement's own fund id
-  originalFundStatus, // that fund's current status
+  revolvingFunds = [],
+  originalFundId,
+  originalFundStatus,
+  getFundLabel,
 }) {
   const [remarks, setRemarks] = useState('')
   const [selectedFundId, setSelectedFundId] = useState('')
@@ -127,7 +128,8 @@ export default function VerifyLiquidationModal({
               <option value="">Select a fund…</option>
               {revolvingFunds.map((f) => (
                 <option key={f.id} value={f.id}>
-                  {f.label || `Fund #${f.id}`} — {f.status} (Balance: {formatCurrency(f.balance)})
+                  {getFundLabel ? getFundLabel(f.id) : `Fund #${f.id}`} - {f.status} (Balance:{' '}
+                  {formatCurrency(f.balance)})
                 </option>
               ))}
             </select>

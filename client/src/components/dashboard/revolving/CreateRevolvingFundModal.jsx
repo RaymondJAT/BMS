@@ -12,6 +12,7 @@ export default function CreateRevolvingFundModal({
   budgets = [],
   revolvingFunds = [],
   isBudgetsLoading = false,
+  getDepartmentName,
 }) {
   const extractNumericValue = (val) => {
     if (val === null || val === undefined) return ''
@@ -20,17 +21,27 @@ export default function CreateRevolvingFundModal({
     return !isNaN(num) && num > 0 ? num : ''
   }
 
-  // Filter out budgets that already have an associated revolving fund
+  // Only exclude a budget when it has a fund that's still ACTIVE (not
+  // CLOSED/CLEARED) — a budget whose only fund has been closed/cleared is
+  // eligible for a fresh fund (the backend's own day-cycle rules in
+  // upsertRevolvingFund enforce the finer-grained "not yet closed from
+  // yesterday" / "same type already exists today" checks server-side).
   const availableBudgets = useMemo(() => {
-    const existingFundBudgetIds = new Set(
+    const blockedBudgetIds = new Set(
       revolvingFunds
+        .filter((fund) => !['CLOSED', 'CLEARED'].includes(String(fund.status || '').toUpperCase()))
         .map((fund) => fund.budget_id || fund.budgetId || fund.source_budget_id)
         .filter(Boolean)
         .map(String),
     )
 
-    return budgets.filter((b) => !existingFundBudgetIds.has(String(b.id)))
+    return budgets.filter((b) => !blockedBudgetIds.has(String(b.id)))
   }, [budgets, revolvingFunds])
+
+  const getBudgetLabel = (b) => {
+    const dept = getDepartmentName ? getDepartmentName(b) : `Department #${b.department_id}`
+    return b.type ? `${dept} — ${b.type}` : dept
+  }
 
   const handleAmountKeyDown = (e) => {
     if (['e', 'E', '+', '-'].includes(e.key)) {
@@ -43,7 +54,12 @@ export default function CreateRevolvingFundModal({
     const selectedBudget = availableBudgets.find((b) => String(b.id) === String(selectedId))
 
     if (selectedBudget) {
+      // remaining_budget is the live "Total Budget minus everything
+      // currently deployed" figure computed by getBudgetBudget — the
+      // correct default cap for a new fund. The other keys are kept as a
+      // defensive fallback only.
       const rawAmount =
+        selectedBudget.remaining_budget ??
         selectedBudget.remaining_balance ??
         selectedBudget.balance ??
         selectedBudget.allocated_amount ??
@@ -58,12 +74,7 @@ export default function CreateRevolvingFundModal({
         ...prev,
         budgetId: selectedId,
         budget_id: selectedId,
-        name:
-          selectedBudget.title ||
-          selectedBudget.name ||
-          selectedBudget.budget_name ||
-          selectedBudget.fund_name ||
-          '',
+        name: getBudgetLabel(selectedBudget),
         baseCap: cleanCap !== '' ? String(cleanCap) : prev.baseCap || prev.base_cap || '',
         base_cap: cleanCap !== '' ? String(cleanCap) : prev.base_cap || prev.baseCap || '',
       }))
@@ -84,13 +95,11 @@ export default function CreateRevolvingFundModal({
     setFormData((prev) => ({
       ...prev,
       [name]: value,
-      // Sync camelCase and snake_case properties
       ...(name === 'baseCap' || name === 'base_cap' ? { baseCap: value, base_cap: value } : {}),
       ...(name === 'budgetId' || name === 'budget_id' ? { budgetId: value, budget_id: value } : {}),
     }))
   }
 
-  // Derived Values & Validations
   const currentBudgetId = formData.budgetId || formData.budget_id || ''
   const currentBaseCap = formData.baseCap || formData.base_cap || ''
 
@@ -110,9 +119,7 @@ export default function CreateRevolvingFundModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Create Revolving Fund" maxWidth="max-w-xl">
       <form onSubmit={onSubmit} className="space-y-3.5 sm:space-y-4">
-        {/* RESPONSIVE INPUT GRID */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-3.5">
-          {/* Source Budget Allocation */}
           <div className="sm:col-span-2">
             <label className="block text-[11px] sm:text-xs font-semibold text-slate-700 mb-1 truncate">
               Source Budget Allocation <span className="text-red-500">*</span>
@@ -130,13 +137,17 @@ export default function CreateRevolvingFundModal({
               </option>
               {availableBudgets.map((b) => (
                 <option key={b.id} value={b.id}>
-                  {b.title || b.name || b.budget_name || `Budget #${b.id}`}
+                  {getBudgetLabel(b)}
                 </option>
               ))}
             </select>
+            {!isBudgetsLoading && availableBudgets.length === 0 && (
+              <p className="text-[11px] text-slate-400 mt-1">
+                No budgets are currently eligible for a new fund.
+              </p>
+            )}
           </div>
 
-          {/* Beginning Fund Amount */}
           <div className="sm:col-span-1">
             <label className="block text-[11px] sm:text-xs font-semibold text-slate-700 mb-1 truncate">
               Beginning Fund (PHP) <span className="text-red-500">*</span>
@@ -163,7 +174,6 @@ export default function CreateRevolvingFundModal({
           </div>
         </div>
 
-        {/* ACTION CONTROLS */}
         <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-3 border-t border-slate-100">
           <button
             type="button"

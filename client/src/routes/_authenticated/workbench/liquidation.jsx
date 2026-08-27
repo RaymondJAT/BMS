@@ -36,7 +36,7 @@ function LiquidationPage() {
     markIncomplete,
   } = useLiquidations({ role: userRole })
   const { districts, modes, getModeName } = useLiquidationMasterData()
-  const { particulars, getEmployeeName } = useCashDisbursementLookups()
+  const { particulars, getEmployeeName, getFundLabel } = useCashDisbursementLookups()
 
   // Needed only for the Verify modal's fund picker: the disbursement tied
   // to the liquidation (to find its ORIGINAL fund + that fund's status)
@@ -218,6 +218,7 @@ function LiquidationPage() {
           revolvingFunds={eligibleFundsForVerify}
           originalFundId={originalFundId}
           originalFundStatus={originalFund?.status}
+          getFundLabel={getFundLabel}
         />
       )}
       {activeModal === 'finance' && detail && (

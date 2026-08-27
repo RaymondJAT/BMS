@@ -40,34 +40,40 @@ function useCloseRevolvingFund() {
     const fundId = closeModalFund.id || closeModalFund.revolving_fund_id
     const cashOnHand = parseFloat(closureData.cashonhand) || 0
     const gcash = parseFloat(closureData.gcash) || 0
+    const totalCash = cashOnHand + gcash
 
-    // BUG FIX 1: this used to hardcode status: 'CLOSED', which isn't a
-    // valid reconciliation status as far as the backend's
-    // upsertClosedRevolvingFund is concerned (it only accepts
-    // BALANCED/SHORT/OVER) — that invalid value silently failed
-    // validation there and fell back to 'BALANCED' every time, regardless
-    // of actual variance. SubmitRevolvingFundModal already computes the
-    // real variance and passes it as closureData.varianceStatus, so use
-    // that directly instead of re-deriving or hardcoding it here.
     const varianceStatus = VALID_VARIANCE_STATUSES.includes(
       String(closureData.varianceStatus || '').toUpperCase(),
     )
       ? closureData.varianceStatus.toUpperCase()
       : 'BALANCED'
 
-    // BUG FIX 2: this used to always stamp today's date via getTodayISO(),
-    // discarding the "Closure Date" the user picked in the modal (passed
-    // through as closureData.end_date / closureData.reportedDate). Now
-    // uses whichever the modal supplied, falling back to today only if
-    // neither is present (e.g. called from somewhere without that field).
     const closureDate = closureData.end_date || closureData.reportedDate || getLocalTodayISO()
+
+    // Pull the fund's own ledger numbers (beginning/added/returned/
+    // expended) straight from the row the modal was opened with, so the
+    // closed_revolving_fund audit row records a real reconciliation
+    // rather than defaulting these to 0 — SubmitRevolvingFundModal
+    // already computes expectedEndingBalance from the same fields, but
+    // that value never made it into the payload before.
+    const beginning = parseFloat(closeModalFund.beginning ?? closeModalFund.baseCap ?? 0)
+    const added = parseFloat(closeModalFund.added ?? closeModalFund.replenished ?? 0)
+    const returned = parseFloat(closeModalFund.returned ?? 0)
+    const expended = parseFloat(closeModalFund.amount_expended ?? closeModalFund.expended ?? 0)
+    const expectedEndingBalance =
+      closureData.expectedEndingBalance ?? beginning + added + returned - expended
 
     const payload = {
       revolving_fund_id: fundId,
       end_date: closureDate,
+      beginning,
+      cash_inflow: added + returned,
+      cash_outflow: expended,
+      ending: expectedEndingBalance,
       cashonhand: cashOnHand,
       gcash: gcash,
-      total_cash: cashOnHand + gcash,
+      total_cash: totalCash,
+      sub_total: totalCash,
       status: varianceStatus,
       remarks: closureData.remarks || '',
     }

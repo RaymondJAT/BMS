@@ -355,6 +355,7 @@ function RevolvingFundPage() {
         budgets={budgets}
         revolvingFunds={funds}
         isBudgetsLoading={isBudgetsLoading}
+        getDepartmentName={getDepartmentName}
       />
 
       <ViewRevolvingFundModal

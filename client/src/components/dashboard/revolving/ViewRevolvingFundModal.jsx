@@ -15,7 +15,27 @@ export default function ViewRevolvingFundModal({ fund, isOpen, onClose, getFundL
     ? getFundLabel(fund)
     : fund.name || fund.fund_name || `Fund #${fund.id ?? fund.revolving_fund_id ?? 'N/A'}`
   const fundId = fund.id || fund.revolving_fund_id || fund.fund_id || 'N/A'
-  const totalCap = (fund.baseCap || 0) + (fund.replenished || 0)
+
+  // Backend (revolvingFundController.js getRevolvingFund) returns:
+  // beginning, added, total_fund, issued, returned, outstanding,
+  // amount_expended, liquidated, balance, status — NOT baseCap/replenished/unliquidated.
+  const beginning = parseFloat(fund.beginning ?? fund.baseCap ?? fund.base_cap ?? 0)
+  const added = parseFloat(fund.added ?? fund.replenished ?? 0)
+  const totalCap = parseFloat(fund.total_fund ?? beginning + added)
+  // rf_outstanding is exactly "still unliquidated against this fund".
+  const unliquidated = parseFloat(fund.outstanding ?? fund.unliquidated ?? 0)
+
+  const statusUpper = String(fund.status || '').toUpperCase()
+  const displayStatus = statusUpper === 'OPEN' ? 'ACTIVE' : fund.status || 'ACTIVE'
+  const statusStyles = {
+    ACTIVE: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'ON REVIEW': 'bg-amber-50 text-amber-700 border-amber-200',
+    CLOSED: 'bg-slate-100 text-slate-600 border-slate-200',
+    CLEARED: 'bg-purple-50 text-purple-700 border-purple-200',
+    RETURN: 'bg-rose-50 text-rose-700 border-rose-200',
+  }
+  const statusStyle =
+    statusStyles[displayStatus.toUpperCase()] || 'bg-emerald-50 text-emerald-700 border-emerald-200'
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Revolving Fund Details" maxWidth="max-w-md">
@@ -28,8 +48,10 @@ export default function ViewRevolvingFundModal({ fund, isOpen, onClose, getFundL
               ID: {fundId}
             </span>
           </div>
-          <span className="px-2.5 py-1 rounded-full text-[10px] sm:text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-            {fund.status || 'ACTIVE'}
+          <span
+            className={`px-2.5 py-1 rounded-full text-[10px] sm:text-xs font-bold border shrink-0 ${statusStyle}`}
+          >
+            {displayStatus}
           </span>
         </div>
 
@@ -48,7 +70,7 @@ export default function ViewRevolvingFundModal({ fund, isOpen, onClose, getFundL
               Unliquidated
             </span>
             <p className="text-xs sm:text-sm font-bold text-amber-900 mt-0.5">
-              {formatCurrency(fund.unliquidated)}
+              {formatCurrency(unliquidated)}
             </p>
           </div>
           <div className="bg-emerald-50/50 p-2.5 sm:p-3 rounded-xl border border-emerald-200/60">
@@ -69,28 +91,30 @@ export default function ViewRevolvingFundModal({ fund, isOpen, onClose, getFundL
           <div className="divide-y divide-slate-100 text-xs">
             <div className="flex justify-between items-center px-3 sm:px-3.5 py-2 text-slate-700">
               <span>Beginning Base Cap</span>
-              <span className="font-semibold text-slate-900">{formatCurrency(fund.baseCap)}</span>
+              <span className="font-semibold text-slate-900">{formatCurrency(beginning)}</span>
             </div>
             <div className="flex justify-between items-center px-3 sm:px-3.5 py-2 text-slate-700">
               <span>Replenishments</span>
-              <span className="font-semibold text-emerald-600">
-                +{formatCurrency(fund.replenished)}
-              </span>
+              <span className="font-semibold text-emerald-600">+{formatCurrency(added)}</span>
             </div>
             <div className="flex justify-between items-center px-3 sm:px-3.5 py-2 text-slate-700">
-              <span>Total Disbursements</span>
+              <span>Total Disbursements (Issued)</span>
               <span className="font-semibold text-slate-900">{formatCurrency(fund.issued)}</span>
             </div>
             <div className="flex justify-between items-center px-3 sm:px-3.5 py-2 text-slate-700">
-              <span>Liquidated Expenses</span>
-              <span className="font-semibold text-emerald-600">
-                {formatCurrency(fund.liquidated)}
+              <span>Expended</span>
+              <span className="font-semibold text-orange-600">
+                {formatCurrency(fund.amount_expended)}
               </span>
             </div>
             <div className="flex justify-between items-center px-3 sm:px-3.5 py-2 text-slate-700">
               <span>Returned Cash</span>
+              <span className="font-semibold text-blue-600">{formatCurrency(fund.returned)}</span>
+            </div>
+            <div className="flex justify-between items-center px-3 sm:px-3.5 py-2 text-slate-700">
+              <span>Total Liquidated (Expended + Returned)</span>
               <span className="font-semibold text-emerald-600">
-                {formatCurrency(fund.returned)}
+                {formatCurrency(fund.liquidated)}
               </span>
             </div>
           </div>

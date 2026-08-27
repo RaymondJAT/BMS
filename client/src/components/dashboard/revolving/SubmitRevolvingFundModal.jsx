@@ -41,11 +41,11 @@ export default function SubmitRevolvingFundModal({
   }, [fund, getFundLabel, fundId])
 
   const beginningAmount = parseFloat(fund?.beginning ?? fund?.baseCap ?? fund?.base_cap ?? 0)
-  const addedAmount = parseFloat(fund?.replenished ?? fund?.added ?? 0)
+  const addedAmount = parseFloat(fund?.added ?? fund?.replenished ?? 0)
   const returnedAmount = parseFloat(
     fund?.returned ?? fund?.cashReturned ?? fund?.cash_returned ?? 0,
   )
-  const expendedAmount = parseFloat(fund?.expended ?? fund?.liquidated ?? fund?.issued ?? 0)
+  const expendedAmount = parseFloat(fund?.amount_expended ?? fund?.expended ?? 0)
 
   const expectedEndingBalance = useMemo(() => {
     if (!fund) return 0
