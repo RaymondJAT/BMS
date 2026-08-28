@@ -15,6 +15,7 @@ const { cashDisbursementRouter } = require('../routes/cash-disbursement.routes')
 const { cashRequestRouter } = require('../routes/cash-request.routes')
 const { liquidationRouter } = require('../routes/liquidation-liquidation.routes')
 const { redFlagRouter } = require('../routes/red-flag.routes')
+const { synchronizeRouter } = require('../routes/synchronize.routes')
 
 const initRoutes = (app) => {
   //app.use(auth)
@@ -34,6 +35,7 @@ const initRoutes = (app) => {
   app.use('/cash-request', cashRequestRouter)
   app.use('/liquidation', liquidationRouter)
   app.use('/red-flag', redFlagRouter)
+  app.use('/synchronize', synchronizeRouter)
 }
 
 module.exports = { initRoutes }

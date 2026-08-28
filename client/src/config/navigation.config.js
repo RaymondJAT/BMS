@@ -33,6 +33,8 @@ export const NAVIGATION_ITEMS = [
       { id: 'master-districts', title: 'Districts & Stores', to: '/master/districts' },
       { id: 'master-transport', title: 'Modes of Transportation', to: '/master/transportation' },
       { id: 'master-particulars', title: 'Particulars & Expense Types', to: '/master/particulars' },
+      // Access: Admin (Pulls departments/positions/employees/user accounts from HRMIS)
+      { id: 'master-synchronize', title: 'HRMIS Synchronize', to: '/master/synchronize' },
     ],
   },
   // FUND MANAGEMENT
