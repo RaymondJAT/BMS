@@ -28,7 +28,7 @@ export const NAVIGATION_ITEMS = [
       { id: 'master-users', title: 'Users', to: '/master/users' },
       { id: 'master-route-access', title: 'Route Access', to: '/master/route-access' },
       { id: 'master-departments', title: 'Departments', to: '/master/departments' },
-      { id: 'master-positions', title: 'Positions', to: '/master/positions' },
+      // { id: 'master-positions', title: 'Positions', to: '/master/positions' },
       { id: 'master-employees', title: 'Employees', to: '/master/employees' },
       { id: 'master-districts', title: 'Districts & Stores', to: '/master/districts' },
       { id: 'master-transport', title: 'Modes of Transportation', to: '/master/transportation' },

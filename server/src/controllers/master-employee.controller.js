@@ -44,17 +44,18 @@ const upsertMasterEmployee = async (req, res) => {
   //     description: 'Employee status'
   //   }
   */
-  
+
   // Destructure only the non-system keys from req.body
   const { id, fullname, department_id, position_id, status } = req.body
-  
+
   let query
 
   try {
     if (id) {
       let updateData = {}
       if (fullname !== undefined) updateData[Master.Employee.cols.fullname] = fullname
-      if (department_id !== undefined) updateData[Master.Employee.cols.department_id] = department_id
+      if (department_id !== undefined)
+        updateData[Master.Employee.cols.department_id] = department_id
       if (position_id !== undefined) updateData[Master.Employee.cols.position_id] = position_id
       if (status !== undefined) updateData[Master.Employee.cols.status] = status
 
@@ -64,10 +65,7 @@ const upsertMasterEmployee = async (req, res) => {
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ message: 'No data to update' })
       } else {
-        query = SQL.model(Master.Employee)
-          .update(updateData)
-          .where(Master.Employee.pk, id)
-          .build()
+        query = SQL.model(Master.Employee).update(updateData).where(Master.Employee.pk, id).build()
       }
     } else {
       // Basic validation for inserts (modify as needed)
@@ -81,8 +79,10 @@ const upsertMasterEmployee = async (req, res) => {
           [Master.Employee.cols.department_id]: department_id,
           [Master.Employee.cols.position_id]: position_id,
           [Master.Employee.cols.status]: status,
-          ...( Master.Employee.cols.createdBy ? { [Master.Employee.cols.createdBy]: userId } : {} ),
-          ...( Master.Employee.cols.createdAt ? { [Master.Employee.cols.createdAt]: new Date() } : {} ),
+          ...(Master.Employee.cols.createdBy ? { [Master.Employee.cols.createdBy]: userId } : {}),
+          ...(Master.Employee.cols.createdAt
+            ? { [Master.Employee.cols.createdAt]: new Date() }
+            : {}),
         })
         .build()
     }
@@ -104,7 +104,7 @@ const upsertMasterEmployee = async (req, res) => {
 
 /**
  * @name getMasterEmployee
- * @description Get all Employee records
+ * @description Get all Employee records with department name and position description
  */
 const getMasterEmployee = async (req, res) => {
   // #swagger.tags = ['Master Employee']
@@ -113,14 +113,25 @@ const getMasterEmployee = async (req, res) => {
   try {
     const { sql, bindings } = SQL.model(Master.Employee)
       .select([
-        Master.Employee.cols.id,
-        Master.Employee.cols.fullname,
-        Master.Employee.cols.department_id,
-        Master.Employee.cols.position_id,
-        Master.Employee.cols.status,
-        Master.Employee.cols.createdAt
+        `${Master.Employee.table}.${Master.Employee.cols.id} AS id`,
+        `${Master.Employee.table}.${Master.Employee.cols.fullname} AS fullname`,
+        `${Master.Employee.table}.${Master.Employee.cols.department_id} AS department_id`,
+        `${Master.Department.table}.${Master.Department.cols.name} AS department_name`,
+        `${Master.Employee.table}.${Master.Employee.cols.position_id} AS position_id`,
+        `${Master.Position.table}.${Master.Position.cols.description} AS position_name`,
+        `${Master.Employee.table}.${Master.Employee.cols.status} AS status`,
+        `${Master.Employee.table}.${Master.Employee.cols.createdAt} AS createdAt`,
       ])
-      // .where(Master.Employee.cols.companyId, companyId) // Uncomment if company-scoped
+      .leftJoin(
+        Master.Department.table,
+        `${Master.Employee.table}.${Master.Employee.cols.department_id}`,
+        `${Master.Department.table}.${Master.Department.pk}`,
+      )
+      .leftJoin(
+        Master.Position.table,
+        `${Master.Employee.table}.${Master.Employee.cols.position_id}`,
+        `${Master.Position.table}.${Master.Position.pk}`,
+      )
       .build()
 
     const result = await Query(sql, bindings)
@@ -134,5 +145,5 @@ const getMasterEmployee = async (req, res) => {
 
 module.exports = {
   getMasterEmployee,
-  upsertMasterEmployee
+  upsertMasterEmployee,
 }
