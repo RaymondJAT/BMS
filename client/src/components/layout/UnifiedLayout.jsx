@@ -12,10 +12,10 @@ export default function UnifiedLayout({ children }) {
   // Track window resizing to handle tablet/mobile state changes dynamically
   useEffect(() => {
     const handleResize = () => {
-      const mobileStatus = window.innerWidth < 1024 
+      const mobileStatus = window.innerWidth < 1024
       setIsMobile(mobileStatus)
       if (!mobileStatus) {
-        setIsMobileOpen(false) 
+        setIsMobileOpen(false)
       }
     }
 

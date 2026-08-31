@@ -18,13 +18,10 @@ export const Route = createFileRoute('/_authenticated/master/synchronize')({
 })
 
 function SynchronizePage() {
-  const [token, setToken] = useState('')
   const { runSync, isSyncing, lastResult, error } = useSynchronize()
 
-  const handleSubmit = (e) => {
-    e.preventDefault()
-    if (!token.trim()) return
-    runSync(token.trim())
+  const handleRun = () => {
+    runSync()
   }
 
   return (
@@ -38,26 +35,15 @@ function SynchronizePage() {
         </p>
       </div>
 
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white p-3 sm:p-3.5 rounded-xl border border-slate-200/80 flex flex-col sm:flex-row items-stretch sm:items-end gap-2.5 shrink-0"
-      >
-        <div className="flex-1">
-          <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-            HRMIS Bearer Token <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="password"
-            required
-            placeholder="Paste HRMIS API token..."
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
-          />
-        </div>
+      <div className="bg-white p-3 sm:p-3.5 rounded-xl border border-slate-200/80 flex items-center justify-between gap-2.5 shrink-0">
+        <p className="text-xs text-slate-500">
+          Fetches a fresh token from HRMIS and pulls the latest data automatically — no manual token
+          needed.
+        </p>
         <button
-          type="submit"
-          disabled={isSyncing || !token.trim()}
+          type="button"
+          onClick={handleRun}
+          disabled={isSyncing}
           className="inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#E31837] hover:bg-[#c4122e] text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
         >
           {isSyncing ? (
@@ -67,7 +53,7 @@ function SynchronizePage() {
           )}
           {isSyncing ? 'Synchronizing...' : 'Run Synchronization'}
         </button>
-      </form>
+      </div>
 
       {error && (
         <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl shrink-0">
@@ -77,6 +63,21 @@ function SynchronizePage() {
 
       {lastResult && (
         <div className="flex-1 min-h-0 overflow-y-auto space-y-3">
+          {lastResult.fetch_errors?.length > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-3 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-red-800">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                HRMIS Endpoints Unreachable
+              </div>
+              <div className="text-[11px] text-red-800 space-y-1">
+                {lastResult.fetch_errors.map((e, i) => (
+                  <div key={`fetch-err-${i}`}>
+                    <strong>{e.endpoint}</strong>: {e.reason}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <StatCard
               title="Departments Added"

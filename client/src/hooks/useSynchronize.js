@@ -7,13 +7,9 @@ function useSynchronize() {
   const [lastResult, setLastResult] = useState(null)
 
   const syncMutation = useMutation({
-    mutationFn: (token) => syncApi.run(token),
+    mutationFn: () => syncApi.run(),
     onSuccess: (data) => {
       setLastResult(data.summary || data)
-      // Departments/positions/employees feed dropdowns across Budget,
-      // Revolving Funds, Cash Requests, and Liquidations — refresh
-      // anything that reads master data so new hires/departments show up
-      // without a full page reload.
       queryClient.invalidateQueries({ queryKey: ['departments'] })
       queryClient.invalidateQueries({ queryKey: ['employees'] })
     },
