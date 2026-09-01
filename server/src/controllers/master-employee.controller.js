@@ -114,6 +114,7 @@ const getMasterEmployee = async (req, res) => {
     const { sql, bindings } = SQL.model(Master.Employee)
       .select([
         `${Master.Employee.table}.${Master.Employee.cols.id} AS id`,
+        `${Master.Employee.table}.${Master.Employee.cols.id} AS employee_id`,
         `${Master.Employee.table}.${Master.Employee.cols.fullname} AS fullname`,
         `${Master.Employee.table}.${Master.Employee.cols.department_id} AS department_id`,
         `${Master.Department.table}.${Master.Department.cols.name} AS department_name`,

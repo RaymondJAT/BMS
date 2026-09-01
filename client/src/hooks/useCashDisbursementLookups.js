@@ -1,20 +1,24 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { revolvingFundApi } from '../api/revolvingFundApi'
 import { budgetApi } from '../api/budgetApi'
 import { masterDepartmentApi } from '../api/masterDepartmentApi'
 import { masterEmployeeApi } from '../api/masterEmployeeApi'
 import { masterParticularsApi } from '../api/masterParticularsApi'
+import { masterUserApi } from '../api/masterUserApi'
+import { masterAccessApi } from '../api/masterAccessApi'
 
 /**
- * Fetches the reference data needed by the disbursement modals and table
- * (fund/department/employee/particulars dropdowns + id→label resolution).
+ * Central reference-data hook for Budget / Revolving Fund / Cash
+ * Disbursement / Cash Request / Liquidation / Master Files pages.
  *
- * NOTE: master-employee and master-particulars response shapes are assumed
- * (see api/masterEmployeeApi.js and api/masterParticularsApi.js). The
- * resolver functions below try a couple of likely key names as a fallback
- * so a shape mismatch degrades to "Employee #12" style placeholders rather
- * than throwing — but the real keys should be confirmed and this narrowed
- * once the actual controllers are available.
+ * Field names below match the confirmed backend response shapes:
+ *   - master-department: { id, code, name, status, createdAt }
+ *   - master-position:   { id, code, description, status, createdAt }
+ *   - master-employee:   { id, employee_id, fullname, department_id,
+ *                           department_name, position_id, position_name,
+ *                           status, createdAt }
+ *   - master-user:       { id, user_id, username, password, status,
+ *                           employee_id, access_id, fullname, createdAt }
  */
 export function useCashDisbursementLookups() {
   const [revolvingFunds, setRevolvingFunds] = useState([])
@@ -22,6 +26,8 @@ export function useCashDisbursementLookups() {
   const [departments, setDepartments] = useState([])
   const [employees, setEmployees] = useState([])
   const [particulars, setParticulars] = useState([])
+  const [users, setUsers] = useState([])
+  const [accessRoles, setAccessRoles] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -29,28 +35,30 @@ export function useCashDisbursementLookups() {
     setIsLoading(true)
     setError(null)
     try {
-      const [rfRes, budgetRes, deptRes, empRes, partRes] = await Promise.allSettled([
-        revolvingFundApi.getAll(),
-        budgetApi.getAll(),
-        masterDepartmentApi.getAll(),
-        masterEmployeeApi.getAll(),
-        masterParticularsApi.getAll(),
-      ])
+      const [rfRes, budgetRes, deptRes, empRes, partRes, userRes, accessRes] =
+        await Promise.allSettled([
+          revolvingFundApi.getAll(),
+          budgetApi.getAll(),
+          masterDepartmentApi.getAll(),
+          masterEmployeeApi.getAll(),
+          masterParticularsApi.getAll(),
+          masterUserApi.getAll(),
+          masterAccessApi?.getAll ? masterAccessApi.getAll() : Promise.resolve([]),
+        ])
 
-      if (rfRes.status === 'fulfilled') setRevolvingFunds(rfRes.value || [])
-      else console.error('Failed to fetch revolving funds:', rfRes.reason)
+      const unwrap = (res) => {
+        if (res.status !== 'fulfilled') return []
+        const val = res.value
+        return Array.isArray(val) ? val : val?.data || val?.result || []
+      }
 
-      if (budgetRes.status === 'fulfilled') setBudgets(budgetRes.value || [])
-      else console.error('Failed to fetch budgets:', budgetRes.reason)
-
-      if (deptRes.status === 'fulfilled') setDepartments(deptRes.value || [])
-      else console.error('Failed to fetch departments:', deptRes.reason)
-
-      if (empRes.status === 'fulfilled') setEmployees(empRes.value || [])
-      else console.error('Failed to fetch employees:', empRes.reason)
-
-      if (partRes.status === 'fulfilled') setParticulars(partRes.value || [])
-      else console.error('Failed to fetch particulars:', partRes.reason)
+      setRevolvingFunds(unwrap(rfRes))
+      setBudgets(unwrap(budgetRes))
+      setDepartments(unwrap(deptRes))
+      setEmployees(unwrap(empRes))
+      setParticulars(unwrap(partRes))
+      setUsers(unwrap(userRes))
+      setAccessRoles(unwrap(accessRes))
     } catch (err) {
       console.error('Failed to fetch cash disbursement lookups:', err)
       setError('Failed to load reference data.')
@@ -63,6 +71,19 @@ export function useCashDisbursementLookups() {
     fetchAll()
   }, [fetchAll])
 
+  // id -> role name, for resolving a user's access_id to a display label.
+  const rolesMap = useMemo(() => {
+    return accessRoles.reduce((acc, role) => {
+      const id = role.id ?? role.access_id ?? role.role_id
+      const name = role.name || role.role_name || role.access_name
+      if (id != null && name) {
+        acc[id] = name
+        acc[String(id)] = name
+      }
+      return acc
+    }, {})
+  }, [accessRoles])
+
   const getDepartmentName = useCallback(
     (id) => {
       const match = departments.find((d) => String(d.id) === String(id))
@@ -74,8 +95,7 @@ export function useCashDisbursementLookups() {
   const getEmployeeName = useCallback(
     (id) => {
       const match = employees.find((e) => String(e.id) === String(id))
-      // Trying a couple of likely key names — see note at top of file.
-      return match?.fullname || match?.name || match?.full_name || `Employee #${id ?? 'N/A'}`
+      return match?.fullname || `Employee #${id ?? 'N/A'}`
     },
     [employees],
   )
@@ -89,11 +109,10 @@ export function useCashDisbursementLookups() {
   )
 
   /**
-   * revolving_fund rows only carry budget_id, not department_id directly —
+   * revolving_fund rows only carry budget_id, not a department directly —
    * the department comes from budget.department_id, one hop further out.
-   * Shows the budget's identity (department + fund type) as its "name" —
-   * budgets have no dedicated name field, so this pairing is the closest
-   * equivalent. No fund id suffix; that's not part of the display name.
+   * Shows the budget's identity (department + fund type) as its "name",
+   * since budgets have no dedicated name field of their own.
    */
   const getFundLabel = useCallback(
     (id) => {
@@ -115,6 +134,8 @@ export function useCashDisbursementLookups() {
     departments,
     employees,
     particulars,
+    users,
+    rolesMap,
     isLoading,
     error,
     refetch: fetchAll,

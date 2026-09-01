@@ -8,32 +8,32 @@ import {
   FileSpreadsheet,
   Users,
   UserCheck,
-  Clock,
+  UserX,
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import { createEmployeeColumns } from '../../../config/tables/employeeColumns'
+import { createUserColumns } from '../../../config/tables/userColumns'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
 
-export const Route = createFileRoute('/_authenticated/master/employees')({
-  component: EmployeesPage,
+export const Route = createFileRoute('/_authenticated/master/users')({
+  component: UsersPage,
 })
 
-export default function EmployeesPage() {
+export default function UsersPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [selectedIds, setSelectedIds] = useState([])
 
-  const [selectedEmployee, setSelectedEmployee] = useState(null)
+  const [selectedUser, setSelectedUser] = useState(null)
   const [isEditOpen, setIsEditOpen] = useState(false)
 
-  // department_name / position_name already come pre-joined on each
-  // employee row (see master-employee.controller.js getMasterEmployee) —
-  // no separate department/position lookup maps are needed here.
-  const { employees = [], isLoading, error } = useCashDisbursementLookups()
+  // fullname comes pre-joined on each user row (see
+  // master-user.controller.js getMasterUser) — rolesMap only resolves
+  // access_id -> a display label.
+  const { users = [], rolesMap = {}, isLoading, error } = useCashDisbursementLookups()
 
   const handleEdit = useCallback((row) => {
-    setSelectedEmployee(row)
+    setSelectedUser(row)
     setIsEditOpen(true)
   }, [])
 
@@ -42,28 +42,34 @@ export default function EmployeesPage() {
   }, [])
 
   const metrics = useMemo(() => {
-    const total = employees.length
-    const regular = employees.filter((e) => (e.status || '').toUpperCase() === 'REGULAR').length
-    const nonRegular = total - regular
-    return { total, regular, nonRegular }
-  }, [employees])
+    const total = users.length
+    const active = users.filter((u) => (u.status || '').toUpperCase() === 'ACTIVE').length
+    const inactive = total - active
+    return { total, active, inactive }
+  }, [users])
 
-  const filteredEmployees = useMemo(() => {
-    return employees.filter((emp) => {
+  const filteredUsers = useMemo(() => {
+    return users.filter((usr) => {
       const q = searchTerm.toLowerCase()
-      const name = (emp.fullname || '').toLowerCase()
-      const deptName = (emp.department_name || '').toLowerCase()
-      const posTitle = (emp.position_name || '').toLowerCase()
+      const fullname = (usr.fullname || '').toLowerCase()
+      const username = (usr.username || '').toLowerCase()
+      const empId = String(usr.employee_id ?? '')
+      const roleName = (rolesMap[usr.access_id] || '').toLowerCase()
 
-      const matchesSearch = name.includes(q) || deptName.includes(q) || posTitle.includes(q)
-      const currentStatus = (emp.status || 'PROBATIONARY').toUpperCase()
+      const matchesSearch =
+        fullname.includes(q) || username.includes(q) || empId.includes(q) || roleName.includes(q)
+
+      const currentStatus = (usr.status || 'ACTIVE').toUpperCase()
       const matchesStatus = statusFilter === 'ALL' || currentStatus === statusFilter
 
       return matchesSearch && matchesStatus
     })
-  }, [employees, searchTerm, statusFilter])
+  }, [users, searchTerm, statusFilter, rolesMap])
 
-  const columns = useMemo(() => createEmployeeColumns({ onEdit: handleEdit }), [handleEdit])
+  const columns = useMemo(
+    () => createUserColumns({ onEdit: handleEdit, rolesMap }),
+    [handleEdit, rolesMap],
+  )
 
   return (
     <div className="w-full h-full flex-1 flex flex-col min-h-0 space-y-3 overflow-hidden">
@@ -71,10 +77,10 @@ export default function EmployeesPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 shrink-0">
         <div>
           <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight">
-            Employees
+            System Users
           </h1>
           <p className="text-slate-500 text-xs mt-0.5">
-            Manage employee directory profiles, assignments, and employment statuses.
+            Manage user accounts, roles, access permissions, and activation statuses.
           </p>
         </div>
 
@@ -92,24 +98,24 @@ export default function EmployeesPage() {
       {/* Metrics Banner */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
         <StatCard
-          title="Total Employees"
+          title="Total Users"
           value={metrics.total}
           icon={Users}
-          subtitle="Registered staff"
+          subtitle="Registered accounts"
           variant="blue"
         />
         <StatCard
-          title="Regular Employees"
-          value={metrics.regular}
+          title="Active Accounts"
+          value={metrics.active}
           icon={UserCheck}
-          subtitle="Regularized status"
+          subtitle="Enabled login access"
           variant="emerald"
         />
         <StatCard
-          title="Non-Regular / Probationary"
-          value={metrics.nonRegular}
-          icon={Clock}
-          subtitle="Probationary or contractual"
+          title="Inactive Accounts"
+          value={metrics.inactive}
+          icon={UserX}
+          subtitle="Disabled or suspended"
           variant="amber"
         />
       </div>
@@ -120,7 +126,7 @@ export default function EmployeesPage() {
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search Employee Name, Dept, or Role..."
+            placeholder="Search Name, Username, or Role..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-8 pr-3 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
@@ -137,8 +143,8 @@ export default function EmployeesPage() {
               className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer text-xs"
             >
               <option value="ALL">All Statuses</option>
-              <option value="REGULAR">Regular</option>
-              <option value="PROBATIONARY">Probationary</option>
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
             </select>
           </div>
         </div>
@@ -149,20 +155,20 @@ export default function EmployeesPage() {
         {isLoading ? (
           <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200/80 p-6">
             <Loader2 className="w-6 h-6 text-[#E31837] animate-spin mb-2" />
-            <p className="text-xs font-medium text-slate-500">Loading employees...</p>
+            <p className="text-xs font-medium text-slate-500">Loading users...</p>
           </div>
         ) : error ? (
           <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-rose-200 p-6 text-center">
             <AlertCircle className="w-8 h-8 text-rose-500 mb-2" />
             <p className="text-sm font-bold text-slate-800">Error Loading Data</p>
             <p className="text-xs text-slate-500 mt-1 max-w-md">
-              {typeof error === 'string' ? error : error?.message || 'Failed to fetch employees.'}
+              {typeof error === 'string' ? error : error?.message || 'Failed to fetch users.'}
             </p>
           </div>
         ) : (
           <DataTable
             columns={columns}
-            data={filteredEmployees}
+            data={filteredUsers}
             keyExtractor={(row) => row.id}
             selectable={true}
             selectedRows={selectedIds}
@@ -171,13 +177,13 @@ export default function EmployeesPage() {
             containerClassName="h-full flex flex-col min-h-0"
             emptyMessage={
               searchTerm || statusFilter !== 'ALL'
-                ? 'No employees match your search parameters.'
-                : 'No employees found.'
+                ? 'No users match your search parameters.'
+                : 'No users found.'
             }
             footer={
               <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
                 <span>
-                  Showing {filteredEmployees.length} entries
+                  Showing {filteredUsers.length} entries
                   {selectedIds.length > 0 && ` (${selectedIds.length} selected)`}
                 </span>
                 <span>Fiscal Year 2026</span>
