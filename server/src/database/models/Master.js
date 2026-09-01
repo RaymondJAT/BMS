@@ -32,6 +32,7 @@
 /**
  * @typedef {Object} EmployeeCols
  * @property {'me_id'} id
+ * @property {'me_employee_id'} employee_id
  * @property {'me_fullname'} fullname
  * @property {'me_department_id'} department_id
  * @property {'me_position_id'} position_id
@@ -43,6 +44,7 @@
  * @typedef {Object} UserCols
  * @property {'mu_id'} id
  * @property {'mu_employee_id'} employee_id
+ * @property {'mu_access_id'} access_id
  * @property {'mu_username'} username
  * @property {'mu_password'} password
  * @property {'mu_status'} status
@@ -157,14 +159,15 @@ const Master = {
     /** @type {EmployeeCols} */
     cols: {
       id: 'me_id',
+      employee_id: 'me_employee_id',
       fullname: 'me_fullname',
       department_id: 'me_department_id',
       position_id: 'me_position_id',
       status: 'me_status',
       createdAt: 'me_createdAt',
     },
-    select: ['me_id', 'me_fullname', 'me_department_id', 'me_position_id', 'me_status', 'me_createdAt'],
-    insert: ['me_fullname', 'me_department_id', 'me_position_id', 'me_status'],
+    select: ['me_id', 'me_employee_id', 'me_fullname', 'me_department_id', 'me_position_id', 'me_status', 'me_createdAt'],
+    insert: ['me_employee_id', 'me_fullname', 'me_department_id', 'me_position_id', 'me_status'],
   },
   User: {
     table: 'master_user',
@@ -174,13 +177,14 @@ const Master = {
     cols: {
       id: 'mu_id',
       employee_id: 'mu_employee_id',
+      access_id: 'mu_access_id',
       username: 'mu_username',
       password: 'mu_password',
       status: 'mu_status',
       createdAt: 'mu_createdAt',
     },
-    select: ['mu_id', 'mu_employee_id', 'mu_username', 'mu_password', 'mu_status', 'mu_createdAt'],
-    insert: ['mu_employee_id', 'mu_username', 'mu_password', 'mu_status'],
+    select: ['mu_id', 'mu_employee_id', 'mu_access_id', 'mu_username', 'mu_password', 'mu_status', 'mu_createdAt'],
+    insert: ['mu_employee_id', 'mu_access_id', 'mu_username', 'mu_password', 'mu_status'],
   },
   RouteAccess: {
     table: 'master_route_access',

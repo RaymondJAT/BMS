@@ -46,13 +46,16 @@ const upsertMasterEmployee = async (req, res) => {
   */
 
   // Destructure only the non-system keys from req.body
-  const { id, fullname, department_id, position_id, status } = req.body
+  const { id, employee_id, fullname, department_id, position_id, status } = req.body
+
+  const userId = req.userId || req.user?.id || 1
 
   let query
 
   try {
     if (id) {
       let updateData = {}
+      if (employee_id !== undefined) updateData[Master.Employee.cols.employee_id] = employee_id
       if (fullname !== undefined) updateData[Master.Employee.cols.fullname] = fullname
       if (department_id !== undefined)
         updateData[Master.Employee.cols.department_id] = department_id
@@ -68,13 +71,13 @@ const upsertMasterEmployee = async (req, res) => {
         query = SQL.model(Master.Employee).update(updateData).where(Master.Employee.pk, id).build()
       }
     } else {
-      // Basic validation for inserts (modify as needed)
       if (!fullname) {
         return res.status(400).json({ message: 'Missing required fields' })
       }
 
       query = SQL.model(Master.Employee)
         .insert({
+          [Master.Employee.cols.employee_id]: employee_id,
           [Master.Employee.cols.fullname]: fullname,
           [Master.Employee.cols.department_id]: department_id,
           [Master.Employee.cols.position_id]: position_id,
@@ -114,7 +117,7 @@ const getMasterEmployee = async (req, res) => {
     const { sql, bindings } = SQL.model(Master.Employee)
       .select([
         `${Master.Employee.table}.${Master.Employee.cols.id} AS id`,
-        `${Master.Employee.table}.${Master.Employee.cols.id} AS employee_id`,
+        `${Master.Employee.table}.${Master.Employee.cols.employee_id} AS employee_id`,
         `${Master.Employee.table}.${Master.Employee.cols.fullname} AS fullname`,
         `${Master.Employee.table}.${Master.Employee.cols.department_id} AS department_id`,
         `${Master.Department.table}.${Master.Department.cols.name} AS department_name`,

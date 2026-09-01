@@ -36,6 +36,8 @@ const upsertMasterAccess = async (req, res) => {
   // Destructure only the non-system keys from req.body
   const { id, name, status } = req.body
 
+  const userId = req.userId || req.user?.id || 1
+
   let query
 
   try {
@@ -53,7 +55,6 @@ const upsertMasterAccess = async (req, res) => {
         query = SQL.model(Master.Access).update(updateData).where(Master.Access.pk, id).build()
       }
     } else {
-      // Basic validation for inserts (modify as needed)
       if (!name) {
         return res.status(400).json({ message: 'Missing required fields' })
       }
@@ -61,7 +62,7 @@ const upsertMasterAccess = async (req, res) => {
       query = SQL.model(Master.Access)
         .insert({
           [Master.Access.cols.name]: name,
-          [Master.Access.cols.status]: status,
+          [Master.Access.cols.status]: status || 'ACTIVE',
           ...(Master.Access.cols.createdBy ? { [Master.Access.cols.createdBy]: userId } : {}),
           ...(Master.Access.cols.createdAt ? { [Master.Access.cols.createdAt]: new Date() } : {}),
         })

@@ -11,6 +11,11 @@ module.exports = {
         autoIncrement: true,
         unique: true,
       },
+      me_employee_id: {
+        type: Sequelize.STRING(9),
+        allowNull: false,
+        unique: true,
+      },
       me_fullname: {
         type: Sequelize.STRING(300),
         allowNull: false,

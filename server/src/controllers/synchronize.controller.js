@@ -4,11 +4,6 @@ const { normalizeName, fetchAllHrmisData } = require('../services/hrmis.service.
 
 const SQL = new SQLQueryBuilder()
 
-// TODO: confirm this import still resolves in the refactored database/
-// layout — the legacy sync route pulled it from repository/helper/
-// crytography. If it's gone, point this at whatever hashing this
-// codebase's login/auth flow actually uses — passwords should never
-// land in master_user as plaintext.
 let EncrypterString
 try {
   ;({ EncrypterString } = require('../repository/helper/crytography'))
@@ -20,48 +15,36 @@ try {
   EncrypterString = (v) => v
 }
 
-// ==========================================
-// SHARED HELPERS
-// ==========================================
+// HRMIS's get-users payload carries no role/access info, but
+// master_user.mu_access_id is NOT NULL with no DB default. Change this
+// (or set HRMIS_SYNC_DEFAULT_ACCESS_NAME) to match a real row in
+// master_access — this MUST exist in the table before sync will work.
+const DEFAULT_SYNCED_ACCESS_NAME = process.env.HRMIS_SYNC_DEFAULT_ACCESS_NAME || 'REQUESTER'
 
 /**
- * Next available `PREFIX-###` code for a table whose code column follows
- * that pattern (master_department.md_code, master_position.mp_code).
+ * Resolves the master_access row every newly-synced user gets assigned,
+ * since HRMIS gives us no role data to sync. Throws loudly instead of
+ * silently defaulting to some arbitrary id, since assigning the wrong
+ * access level is a security-relevant mistake.
  */
-const nextCode = async (table, codeColumn, prefix) => {
+const resolveDefaultAccessId = async () => {
   const rows = await Query(
-    `SELECT MAX(CAST(SUBSTRING(${codeColumn}, ${prefix.length + 1}, 3) AS UNSIGNED)) AS max_seq FROM ${table}`,
+    `SELECT ${Master.Access.cols.id} AS id FROM ${Master.Access.table} WHERE ${Master.Access.cols.name} = ? LIMIT 1`,
+    [DEFAULT_SYNCED_ACCESS_NAME],
   )
-  const seq = rows?.[0]?.max_seq || 0
-  return () => {
-    // returns a code-generator closure so callers don't have to thread
-    // an incrementing counter through a loop by hand
+  const accessId = rows?.[0]?.id
+  if (!accessId) {
+    throw new Error(
+      `No master_access row named "${DEFAULT_SYNCED_ACCESS_NAME}" found — cannot assign a default access level to synced users. Create that access role (e.g. POST /master-access with { "name": "${DEFAULT_SYNCED_ACCESS_NAME}" }), or set HRMIS_SYNC_DEFAULT_ACCESS_NAME to an existing role name.`,
+    )
   }
+  return accessId
 }
 
 // ==========================================
 // DEPARTMENT / POSITION SYNC
-// (structurally identical — both are "HRMIS gives a free-text name,
-// match by normalized name, insert with an auto-generated PREFIX-### code
-// if not found" — collapsed into one generic function instead of two
-// near-duplicate ones.)
 // ==========================================
 
-/**
- * Syncs a simple, name-keyed master table (department or position)
- * against a list of HRMIS records. Returns how many were added and a
- * normalizedName -> local id map, which employee sync uses to resolve
- * FKs without a second round-trip to the DB.
- *
- * @param {object} model - Master.Department or Master.Position
- * @param {string} nameCol - local column to match on ('name' or 'description')
- * @param {string} codeCol - local code column ('code')
- * @param {string} codePrefix - e.g. 'MD-' or 'MP-'
- * @param {string} tableName - raw table name, for the code-sequence query
- * @param {string} rawCodeCol - raw db column name, for the code-sequence query
- * @param {Array} hrmisRecords - HRMIS's raw array for this entity
- * @param {(record: object) => string} getHrmisName - pulls the display name off one HRMIS record
- */
 const syncNamedMasterTable = async ({
   model,
   nameCol,
@@ -72,7 +55,9 @@ const syncNamedMasterTable = async ({
   hrmisRecords,
   getHrmisName,
 }) => {
-  const { sql, bindings } = SQL.model(model).select([model.cols.id, model.cols[nameCol]]).build()
+  const { sql, bindings } = SQL.model(model)
+    .select([`${model.cols.id} AS id`, `${model.cols[nameCol]} AS ${nameCol}`])
+    .build()
   const existing = await Query(sql, bindings)
 
   const byName = new Map(existing.map((row) => [normalizeName(row[nameCol]), row.id]))
@@ -133,33 +118,26 @@ const syncPositions = (hrmisPositions) =>
 // EMPLOYEE SYNC
 // ==========================================
 
-/**
- * master_employee has no column for HRMIS's own employee id — only
- * fullname/department_id/position_id/status. So there's no persisted
- * key to dedupe against or to link a user account back to later. This
- * matches on normalized fullname instead, and returns an in-memory
- * hrmisEmployeeId -> local id map for syncUsers to use within this same
- * run. Two employees sharing a normalized name will collide — flagged,
- * not silently handled. The real fix is adding an external-id column
- * to master_employee.
- */
 const syncEmployees = async (hrmisEmployees, deptByName, posByName) => {
   const { sql, bindings } = SQL.model(Master.Employee)
-    .select([Master.Employee.cols.id, Master.Employee.cols.fullname])
+    .select([
+      `${Master.Employee.cols.id} AS id`,
+      `${Master.Employee.cols.employee_id} AS employee_id`,
+    ])
     .build()
   const existing = await Query(sql, bindings)
-  const byName = new Map(existing.map((row) => [normalizeName(row.fullname), row.id]))
+  const byEmployeeId = new Map(existing.map((row) => [String(row.employee_id), row.id]))
 
   const hrmisIdToLocalId = new Map()
   let added = 0
   const skipped = []
 
   for (const employee of hrmisEmployees) {
+    const hrmisEmployeeId = String(employee.id)
     const fullname = `${employee.firstname || ''} ${employee.lastname || ''}`.trim()
-    const nameKey = normalizeName(fullname)
 
-    if (byName.has(nameKey)) {
-      hrmisIdToLocalId.set(String(employee.id), byName.get(nameKey))
+    if (byEmployeeId.has(hrmisEmployeeId)) {
+      hrmisIdToLocalId.set(hrmisEmployeeId, byEmployeeId.get(hrmisEmployeeId))
       continue
     }
 
@@ -179,6 +157,7 @@ const syncEmployees = async (hrmisEmployees, deptByName, posByName) => {
 
     const insertQuery = SQL.model(Master.Employee)
       .insert({
+        [Master.Employee.cols.employee_id]: hrmisEmployeeId,
         [Master.Employee.cols.fullname]: fullname,
         [Master.Employee.cols.department_id]: departmentId,
         [Master.Employee.cols.position_id]: positionId,
@@ -187,8 +166,8 @@ const syncEmployees = async (hrmisEmployees, deptByName, posByName) => {
       .build()
     const result = await Query(insertQuery.sql, insertQuery.bindings)
 
-    byName.set(nameKey, result.insertId)
-    hrmisIdToLocalId.set(String(employee.id), result.insertId)
+    byEmployeeId.set(hrmisEmployeeId, result.insertId)
+    hrmisIdToLocalId.set(hrmisEmployeeId, result.insertId)
     added += 1
   }
 
@@ -199,14 +178,9 @@ const syncEmployees = async (hrmisEmployees, deptByName, posByName) => {
 // USER ACCOUNT SYNC
 // ==========================================
 
-/**
- * master_user.employee_id is the FK to master_employee.id (the LOCAL
- * id), not HRMIS's own employee id. hrmisIdToLocalId (built in
- * syncEmployees) bridges the two for this run.
- */
-const syncUsers = async (hrmisUsers, hrmisIdToLocalId) => {
+const syncUsers = async (hrmisUsers, hrmisIdToLocalId, defaultAccessId) => {
   const { sql, bindings } = SQL.model(Master.User)
-    .select([Master.User.cols.id, Master.User.cols.employee_id])
+    .select([`${Master.User.cols.id} AS id`, `${Master.User.cols.employee_id} AS employee_id`])
     .build()
   const existing = await Query(sql, bindings)
   const existingByEmployeeId = new Set(existing.map((row) => String(row.employee_id)))
@@ -235,6 +209,7 @@ const syncUsers = async (hrmisUsers, hrmisIdToLocalId) => {
     const insertQuery = SQL.model(Master.User)
       .insert({
         [Master.User.cols.employee_id]: localEmployeeId,
+        [Master.User.cols.access_id]: defaultAccessId,
         [Master.User.cols.username]: username,
         [Master.User.cols.password]: EncrypterString(user_password),
         [Master.User.cols.status]: 'ACTIVE',
@@ -253,20 +228,10 @@ const syncUsers = async (hrmisUsers, hrmisIdToLocalId) => {
 // ENTRY POINT
 // ==========================================
 
-/**
- * @name runSync
- * @description Pulls departments, positions, employees, and user
- *              accounts from HRMIS and upserts anything not already
- *              present locally, in dependency order (departments/
- *              positions -> employees -> users). A failing HRMIS
- *              endpoint doesn't abort the run — see fetchAllHrmisData.
- */
 const runSync = async (req, res) => {
   // #swagger.tags = ['Synchronize']
   // #swagger.description = 'Sync departments, positions, employees, and user accounts from HRMIS'
   try {
-    // Token is fetched fresh from HRMIS's permanent token endpoint right
-    // before use — no human copy-paste step, so no expiry race.
     const hrmis = await fetchAllHrmisData({ debug: true })
 
     const received = {
@@ -276,6 +241,8 @@ const runSync = async (req, res) => {
       users_received: hrmis.users.length,
     }
     console.log('runSync — raw counts received from HRMIS:', received)
+
+    const defaultAccessId = await resolveDefaultAccessId()
 
     const { added: departmentsAdded, byName: deptByName } = await syncDepartments(hrmis.departments)
     const { added: positionsAdded, byName: posByName } = await syncPositions(hrmis.positions)
@@ -287,6 +254,7 @@ const runSync = async (req, res) => {
     const { added: usersAdded, skipped: usersSkipped } = await syncUsers(
       hrmis.users,
       hrmisIdToLocalId,
+      defaultAccessId,
     )
 
     return res.status(200).json({

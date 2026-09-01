@@ -21,6 +21,16 @@ module.exports = {
         onDelete: 'RESTRICT',
         allowNull: false,
       },
+      mu_access_id: {
+        type: Sequelize.INTEGER,
+        references: {
+          model: 'master_access',
+          key: 'ma_id',
+        },
+        onUpdate: 'CASCADE',
+        onDelete: 'RESTRICT',
+        allowNull: false,
+      },
       mu_username: {
         type: Sequelize.STRING(300),
         allowNull: false,

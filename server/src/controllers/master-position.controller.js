@@ -38,10 +38,12 @@ const upsertMasterPosition = async (req, res) => {
   //     description: 'Position status'
   //   }
   */
-  
+
   // Destructure only the non-system keys from req.body
   const { id, code, description, status } = req.body
-  
+
+  const userId = req.userId || req.user?.id || 1
+
   let query
 
   try {
@@ -57,10 +59,7 @@ const upsertMasterPosition = async (req, res) => {
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ message: 'No data to update' })
       } else {
-        query = SQL.model(Master.Position)
-          .update(updateData)
-          .where(Master.Position.pk, id)
-          .build()
+        query = SQL.model(Master.Position).update(updateData).where(Master.Position.pk, id).build()
       }
     } else {
       // Basic validation for inserts (modify as needed)
@@ -73,8 +72,10 @@ const upsertMasterPosition = async (req, res) => {
           [Master.Position.cols.code]: code,
           [Master.Position.cols.description]: description,
           [Master.Position.cols.status]: status,
-          ...( Master.Position.cols.createdBy ? { [Master.Position.cols.createdBy]: userId } : {} ),
-          ...( Master.Position.cols.createdAt ? { [Master.Position.cols.createdAt]: new Date() } : {} ),
+          ...(Master.Position.cols.createdBy ? { [Master.Position.cols.createdBy]: userId } : {}),
+          ...(Master.Position.cols.createdAt
+            ? { [Master.Position.cols.createdAt]: new Date() }
+            : {}),
         })
         .build()
     }
@@ -109,7 +110,7 @@ const getMasterPosition = async (req, res) => {
         Master.Position.cols.code,
         Master.Position.cols.description,
         Master.Position.cols.status,
-        Master.Position.cols.createdAt
+        Master.Position.cols.createdAt,
       ])
       // .where(Master.Position.cols.companyId, companyId) // Uncomment if company-scoped
       .build()
@@ -125,5 +126,5 @@ const getMasterPosition = async (req, res) => {
 
 module.exports = {
   getMasterPosition,
-  upsertMasterPosition
+  upsertMasterPosition,
 }
