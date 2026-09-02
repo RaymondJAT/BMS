@@ -191,7 +191,7 @@ function DepartmentsPage() {
             columns={columns}
             data={filteredDepartments}
             keyExtractor={(row) => row.md_id || row.id}
-            selectable={true}
+            selectable={false}
             selectedRows={selectedIds}
             onSelectionChange={handleSelectionChange}
             maxHeight="h-full"

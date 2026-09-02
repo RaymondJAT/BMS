@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react'
-import { ArrowUpDown, ArrowUp, ArrowDown, Check, Minus } from 'lucide-react'
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { ArrowUpDown, ArrowUp, ArrowDown, Check, Minus, Loader2 } from 'lucide-react'
 
 // Custom Header Checkbox rendering a red/maroon check or dash icon
 const HeaderCheckbox = ({ checked, indeterminate, onChange }) => {
@@ -55,6 +55,9 @@ const DataTable = ({
   containerClassName = '',
   scrollbarClassName = 'custom-scrollbar',
   newestFirst = true,
+  // Infinite Scroll Props
+  initialDisplayCount = 11,
+  pageSize = 11,
   // Selection Props
   selectable = false,
   selectedRows = [],
@@ -62,6 +65,14 @@ const DataTable = ({
 }) => {
   const [sortColumn, setSortColumn] = useState(null)
   const [sortDirection, setSortDirection] = useState('asc')
+  const [visibleCount, setVisibleCount] = useState(initialDisplayCount)
+
+  const scrollContainerRef = useRef(null)
+
+  // Reset pagination limit when sorting or underlying data changes
+  useEffect(() => {
+    setVisibleCount(initialDisplayCount)
+  }, [data, sortColumn, sortDirection, initialDisplayCount])
 
   const handleSort = (key) => {
     if (!key) return
@@ -97,6 +108,27 @@ const DataTable = ({
       return sortDirection === 'asc' ? (aVal > bVal ? 1 : -1) : aVal < bVal ? 1 : -1
     })
   }, [data, sortColumn, sortDirection, newestFirst])
+
+  // Slice sorted dataset to only render up to visibleCount
+  const displayedData = useMemo(() => {
+    return sortedData.slice(0, visibleCount)
+  }, [sortedData, visibleCount])
+
+  const hasMore = visibleCount < sortedData.length
+
+  // Scroll listener to detect when scroll reaches near bottom
+  const handleScroll = useCallback(
+    (e) => {
+      const { scrollTop, scrollHeight, clientHeight } = e.currentTarget
+      // Threshold: Load more when within 20px of the bottom
+      if (scrollHeight - scrollTop <= clientHeight + 20) {
+        if (hasMore) {
+          setVisibleCount((prev) => Math.min(prev + pageSize, sortedData.length))
+        }
+      }
+    },
+    [hasMore, pageSize, sortedData.length],
+  )
 
   // Selection Logic
   const isAllSelected =
@@ -173,7 +205,11 @@ const DataTable = ({
         maxHeight || ''
       } ${containerClassName}`}
     >
-      <div className={`overflow-auto min-w-full flex-1 min-h-0 ${scrollbarClassName}`}>
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className={`overflow-auto min-w-full flex-1 min-h-0 ${scrollbarClassName}`}
+      >
         <table className="w-full text-left border-collapse">
           <thead className="sticky top-0 z-10 bg-slate-50 shadow-xs">
             <tr className="border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
@@ -235,36 +271,49 @@ const DataTable = ({
                 </td>
               </tr>
             ) : (
-              sortedData.map((row, index) => {
-                const rowKey = keyExtractor(row, index)
-                const isSelected = selectedRows.includes(rowKey)
+              <>
+                {displayedData.map((row, index) => {
+                  const rowKey = keyExtractor(row, index)
+                  const isSelected = selectedRows.includes(rowKey)
 
-                return (
-                  <tr
-                    key={rowKey}
-                    onClick={() => onRowClick && onRowClick(row)}
-                    className={`transition-colors hover:bg-slate-50/80 ${
-                      isSelected ? 'bg-rose-50/40' : ''
-                    } ${onRowClick ? 'cursor-pointer' : ''}`}
-                  >
-                    {displayColumns.map((col, cIdx) => {
-                      const alignClass = getAlignmentClass(col.align)
-                      return (
-                        <td key={cIdx} className="py-2.5 px-3 align-top">
-                          {/* Changed items-center to items-start below */}
-                          <div className={`flex items-start ${alignClass}`}>
-                            {col.cell
-                              ? col.cell(row, rowKey)
-                              : col.accessorKey
-                                ? String(row[col.accessorKey] ?? '')
-                                : null}
-                          </div>
-                        </td>
-                      )
-                    })}
+                  return (
+                    <tr
+                      key={rowKey}
+                      onClick={() => onRowClick && onRowClick(row)}
+                      className={`transition-colors hover:bg-slate-50/80 ${
+                        isSelected ? 'bg-rose-50/40' : ''
+                      } ${onRowClick ? 'cursor-pointer' : ''}`}
+                    >
+                      {displayColumns.map((col, cIdx) => {
+                        const alignClass = getAlignmentClass(col.align)
+                        return (
+                          <td key={cIdx} className="py-2.5 px-3 align-top">
+                            <div className={`flex items-start ${alignClass}`}>
+                              {col.cell
+                                ? col.cell(row, rowKey)
+                                : col.accessorKey
+                                  ? String(row[col.accessorKey] ?? '')
+                                  : null}
+                            </div>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  )
+                })}
+
+                {/* Loading indicator row while fetching next scroll batch */}
+                {hasMore && (
+                  <tr>
+                    <td colSpan={displayColumns.length || 1} className="py-3 text-center">
+                      <div className="inline-flex items-center gap-2 text-xs text-slate-400 font-medium">
+                        <Loader2 className="w-3.5 h-3.5 text-[#E31837] animate-spin" />
+                        <span>Loading more rows...</span>
+                      </div>
+                    </td>
                   </tr>
-                )
-              })
+                )}
+              </>
             )}
           </tbody>
         </table>

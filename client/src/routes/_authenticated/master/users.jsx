@@ -170,7 +170,7 @@ export default function UsersPage() {
             columns={columns}
             data={filteredUsers}
             keyExtractor={(row) => row.id}
-            selectable={true}
+            selectable={false}
             selectedRows={selectedIds}
             onSelectionChange={handleSelectionChange}
             maxHeight="h-full"

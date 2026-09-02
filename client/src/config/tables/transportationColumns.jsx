@@ -1,4 +1,4 @@
-import { Edit, Calendar, Tag } from 'lucide-react'
+import { Edit, Calendar, Truck } from 'lucide-react'
 
 const formatDate = (dateString) => {
   if (!dateString) return '—'
@@ -8,30 +8,31 @@ const formatDate = (dateString) => {
     : date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
+// Helper function to extract row data regardless of DataTable prop structure
+const getItem = (rowOrItem) => rowOrItem?.row?.original || rowOrItem || {}
+
 export const createTransportationColumns = ({ onEdit }) => [
   {
-    header: 'Code',
-    accessorKey: 'code',
-    cell: (row) => {
-      const code = row?.code || row?.id || '—'
-      return (
-        <div className="flex items-center gap-1.5 text-xs text-slate-700 font-semibold whitespace-nowrap">
-          <Tag className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-          <span>{code}</span>
-        </div>
-      )
-    },
-  },
-  {
-    header: 'Name / Vehicle',
+    header: 'Transportation',
     accessorKey: 'name',
-    cell: (row) => {
-      const name = row?.name || '—'
+    sortable: true,
+    width: 'w-3/12',
+    cell: (cellProps) => {
+      const item = getItem(cellProps)
+      const name = item?.name || '—'
+      const code = item?.code || item?.id || '—'
+
       return (
-        <div className="min-w-45 w-full">
-          <span className="text-xs font-bold text-slate-900 whitespace-normal wrap-break-word leading-snug block">
-            {name}
-          </span>
+        <div className="flex items-center gap-2.5 min-w-0 w-full">
+          <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
+            <Truck className="w-4 h-4 text-slate-600" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-bold text-slate-900 text-xs tracking-tight truncate">{name}</p>
+            <p className="text-[11px] text-slate-600 font-semibold font-mono truncate mt-0.5">
+              Code: {code}
+            </p>
+          </div>
         </div>
       )
     },
@@ -39,8 +40,11 @@ export const createTransportationColumns = ({ onEdit }) => [
   {
     header: 'Status',
     accessorKey: 'status',
-    cell: (row) => {
-      const status = String(row?.status || 'ACTIVE').toUpperCase()
+    align: 'center',
+    width: 'w-2/12',
+    cell: (cellProps) => {
+      const item = getItem(cellProps)
+      const status = String(item?.status || 'ACTIVE').toUpperCase()
       const isActive = status === 'ACTIVE'
 
       return (
@@ -59,31 +63,42 @@ export const createTransportationColumns = ({ onEdit }) => [
   {
     header: 'Date Created',
     accessorKey: 'createdAt',
-    cell: (row) => (
-      <div className="flex items-center gap-1.5 text-slate-600 text-xs font-medium whitespace-nowrap">
-        <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-        <span>{formatDate(row?.createdAt)}</span>
-      </div>
-    ),
+    sortable: true,
+    align: 'center',
+    width: 'w-4/12',
+    cell: (cellProps) => {
+      const item = getItem(cellProps)
+      return (
+        <div className="flex items-center justify-center gap-1.5 text-slate-700 text-xs font-semibold whitespace-nowrap w-full">
+          <Calendar className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          <span>{formatDate(item?.createdAt)}</span>
+        </div>
+      )
+    },
   },
   {
     header: 'Actions',
     id: 'actions',
-    cell: (row) => (
-      <div className="flex items-center gap-1 justify-end whitespace-nowrap">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            onEdit?.(row)
-          }}
-          className="p-1 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
-          title="Edit Transportation Entry"
-        >
-          <Edit className="w-3.5 h-3.5" />
-        </button>
-      </div>
-    ),
+    align: 'center',
+    width: 'w-1/12',
+    cell: (cellProps) => {
+      const item = getItem(cellProps)
+      return (
+        <div className="flex items-center justify-center whitespace-nowrap w-full">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onEdit?.(item)
+            }}
+            className="p-1 text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
+            title="Edit Transportation Entry"
+          >
+            <Edit className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )
+    },
   },
 ]
 

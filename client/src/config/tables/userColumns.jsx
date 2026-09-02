@@ -1,4 +1,4 @@
-import { Edit, Shield, Calendar, User, UserCheck, UserX, IdCard } from 'lucide-react'
+import { Shield, Calendar, User } from 'lucide-react'
 
 const formatDate = (dateString) => {
   if (!dateString) return '—'
@@ -19,21 +19,23 @@ const formatDate = (dateString) => {
  * comes from useCashDisbursementLookups. password is intentionally
  * never rendered.
  */
-export const createUserColumns = ({ onEdit, rolesMap = {} }) => [
+export const createUserColumns = ({ rolesMap = {} } = {}) => [
   {
     header: 'Full Name',
     accessorKey: 'fullname',
+    sortable: true,
+    width: 'w-3/12',
     cell: (row) => (
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2.5 min-w-0 w-full">
         <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center shrink-0">
           <Shield className="w-4 h-4 text-slate-600" />
         </div>
-        <div>
-          <p className="font-bold text-slate-800 text-xs tracking-tight">
-            {row.fullname || row.username || '—'}
+        <div className="min-w-0 flex-1">
+          <p className="font-bold text-slate-900 text-xs tracking-tight truncate">
+            {row?.fullname || row?.username || '—'}
           </p>
-          <p className="text-[10px] text-slate-400 font-medium">
-            User ID: #{row.user_id ?? row.id ?? 'N/A'}
+          <p className="text-[11px] text-slate-600 font-semibold font-mono truncate mt-0.5">
+            Emp ID: {row?.employee_id ? row.employee_id : '—'}
           </p>
         </div>
       </div>
@@ -42,34 +44,28 @@ export const createUserColumns = ({ onEdit, rolesMap = {} }) => [
   {
     header: 'Username',
     accessorKey: 'username',
+    sortable: true,
+    width: 'w-1/12',
     cell: (row) => (
-      <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
-        <User className="w-3.5 h-3.5 text-slate-400" />
-        <span className="font-mono text-[11px]">{row.username || '—'}</span>
-      </div>
-    ),
-  },
-  {
-    header: 'Employee ID',
-    accessorKey: 'employee_id',
-    cell: (row) => (
-      <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
-        <IdCard className="w-3.5 h-3.5 text-slate-400" />
-        <span>{row.employee_id ? `${row.employee_id}` : '—'}</span>
+      <div className="flex items-center gap-1.5 text-xs text-slate-800 font-semibold min-w-0 w-full">
+        <User className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+        <span className="truncate">{row?.username || '—'}</span>
       </div>
     ),
   },
   {
     header: 'Access Role',
     accessorKey: 'access_id',
+    align: 'center',
+    width: 'w-2/12',
     cell: (row) => {
       const roleName =
-        rolesMap[row.access_id] ||
-        rolesMap[String(row.access_id)] ||
-        (row.access_id != null ? `Role #${row.access_id}` : 'Standard Access')
+        rolesMap[row?.access_id] ||
+        rolesMap[String(row?.access_id)] ||
+        (row?.access_id != null ? `Role #${row.access_id}` : 'Standard Access')
 
       return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-800 border border-slate-300 whitespace-nowrap">
           {roleName}
         </span>
       )
@@ -78,19 +74,20 @@ export const createUserColumns = ({ onEdit, rolesMap = {} }) => [
   {
     header: 'Account Status',
     accessorKey: 'status',
+    align: 'center',
+    width: 'w-2/12',
     cell: (row) => {
-      const status = String(row.status || 'ACTIVE').toUpperCase()
+      const status = String(row?.status || 'ACTIVE').toUpperCase()
       const isActive = status === 'ACTIVE'
 
       return (
         <span
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold tracking-wide ${
+          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold tracking-wide whitespace-nowrap ${
             isActive
               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
               : 'bg-rose-50 text-rose-700 border border-rose-200'
           }`}
         >
-          {isActive ? <UserCheck className="w-3 h-3" /> : <UserX className="w-3 h-3" />}
           {status}
         </span>
       )
@@ -99,29 +96,13 @@ export const createUserColumns = ({ onEdit, rolesMap = {} }) => [
   {
     header: 'Date Created',
     accessorKey: 'createdAt',
+    sortable: true,
+    align: 'right',
+    width: 'w-1/12',
     cell: (row) => (
-      <div className="flex items-center gap-1.5 text-slate-600 text-xs font-medium">
-        <Calendar className="w-3.5 h-3.5 text-slate-400" />
-        <span>{formatDate(row.createdAt)}</span>
-      </div>
-    ),
-  },
-  {
-    header: 'Actions',
-    id: 'actions',
-    cell: (row) => (
-      <div className="flex items-center gap-1 justify-end">
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation()
-            onEdit?.(row)
-          }}
-          className="p-1 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md transition-colors cursor-pointer"
-          title="Edit User"
-        >
-          <Edit className="w-3.5 h-3.5" />
-        </button>
+      <div className="flex items-center justify-end gap-1.5 text-slate-700 text-xs font-semibold whitespace-nowrap w-full">
+        <Calendar className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+        <span>{formatDate(row?.createdAt)}</span>
       </div>
     ),
   },

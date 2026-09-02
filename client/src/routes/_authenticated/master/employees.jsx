@@ -164,7 +164,7 @@ export default function EmployeesPage() {
             columns={columns}
             data={filteredEmployees}
             keyExtractor={(row) => row.id}
-            selectable={true}
+            selectable={false}
             selectedRows={selectedIds}
             onSelectionChange={handleSelectionChange}
             maxHeight="h-full"
