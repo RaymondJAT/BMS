@@ -54,7 +54,7 @@ export const NAVIGATION_ITEMS = [
       { id: 'fund-disbursements', title: 'Disbursement Register', to: '/funds/disbursements' },
 
       // Access: Finance, Admin
-      { id: 'fund-history', title: 'Audit History', to: '/funds/history' },
+      { id: 'fund-history', title: 'Audit History', to: '/funds/audit-history' },
     ],
   },
   // FINANCE & CASH FLOW
@@ -74,7 +74,7 @@ export const NAVIGATION_ITEMS = [
       { id: 'fin-rejected', title: 'Rejected Liquidations', to: '/finance/rejected' },
 
       // Access: Finance, Admin (Master transaction list)
-      { id: 'fin-all', title: 'All Cash Requests', to: '/finance/all' },
+      { id: 'fin-all', title: 'All Cash Requests', to: '/finance/all-cash-requests' },
     ],
   },
   // MY WORKBENCH
@@ -112,7 +112,11 @@ export const NAVIGATION_ITEMS = [
       },
 
       // Access: Custodian, Finance, Admin (Audit log of released funds)
-      { id: 'disb-history', title: 'Disbursement History', to: '/disbursements/history' },
+      {
+        id: 'disb-history',
+        title: 'Disbursement History',
+        to: '/disbursements/disbursement-history',
+      },
     ],
   },
   // REPORTS & LOGS
@@ -123,7 +127,7 @@ export const NAVIGATION_ITEMS = [
     icon: BarChart3,
     children: [
       // Access: Team Leader, Finance, Admin
-      { id: 'report-budget', title: 'Budget Reports', to: '/reports/budget' },
+      { id: 'report-budget', title: 'Budget Reports', to: '/reports/report-budget' },
 
       // Access: Finance, Admin
       { id: 'report-flag-analysis', title: 'Flag Analysis', to: '/reports/flag-analysis' },

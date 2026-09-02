@@ -19,15 +19,15 @@ module.exports = {
         },
         onUpdate: 'CASCADE',
         onDelete: 'RESTRICT',
-        allowNull: false,
+        allowNull: true,
       },
       mra_name: {
         type: Sequelize.STRING(300),
         allowNull: false,
       },
       mra_status: {
-        type: Sequelize.ENUM('ACTIVE', 'INACTIVE', 'DELETED'),
-        defaultValue: 'ACTIVE',
+        type: Sequelize.ENUM('FULL-ACCESS', 'NO-ACCESS'),
+        defaultValue: 'NO-ACCESS',
         allowNull: false,
       },
       mra_createdAt: {
