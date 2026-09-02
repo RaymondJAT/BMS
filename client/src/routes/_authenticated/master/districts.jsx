@@ -4,39 +4,39 @@ import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import DataTable from '../../../components/ui/DataTable'
 import StatCard from '../../../components/ui/StatCard'
-import EditParticularsModal from '../../../components/dashboard/particulars/EditParticularsModal'
+import EditDistrictModal from '../../../components/dashboard/district/EditDistrictModal'
 import {
   Search,
   Filter,
   FileSpreadsheet,
   FileUp,
-  Tags,
+  MapPin,
   CheckCircle2,
   XCircle,
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import { createParticularsColumns } from '../../../config/tables/particularsColumns'
-import { useParticulars } from '../../../hooks/useParticulars'
+import { createDistrictsColumns } from '../../../config/tables/disctrictColumns'
+import { useDistricts } from '../../../hooks/useDistricts'
 
-export const Route = createFileRoute('/_authenticated/master/particulars')({
-  component: ParticularsPage,
+export const Route = createFileRoute('/_authenticated/master/districts')({
+  component: DistrictsPage,
 })
 
-export default function ParticularsPage() {
+export default function DistrictsPage() {
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [selectedIds, setSelectedIds] = useState([])
-  const [selectedParticular, setSelectedParticular] = useState(null)
+  const [selectedDistrict, setSelectedDistrict] = useState(null)
   const [isEditOpen, setIsEditOpen] = useState(false)
 
   const fileInputRef = useRef(null)
 
-  const { particulars, isLoading, isSubmitting, error, updateStatus, importParticulars } =
-    useParticulars()
+  const { districts, isLoading, isSubmitting, error, updateStatus, importDistricts } =
+    useDistricts()
 
   const handleEdit = useCallback((row) => {
-    setSelectedParticular(row)
+    setSelectedDistrict(row)
     setIsEditOpen(true)
   }, [])
 
@@ -44,54 +44,57 @@ export default function ParticularsPage() {
     setSelectedIds(keys)
   }, [])
 
-  // Metrics calculation
+  // Metrics calculation based on mdt_status
   const metrics = useMemo(() => {
-    const total = particulars.length
-    const active = particulars.filter(
-      (p) => (p.status || 'ACTIVE').toUpperCase() === 'ACTIVE',
+    const total = districts.length
+    const active = districts.filter(
+      (d) => (d.mdt_status || d.status || 'ACTIVE').toUpperCase() === 'ACTIVE',
     ).length
     const inactive = total - active
     return { total, active, inactive }
-  }, [particulars])
+  }, [districts])
 
-  // Search & Filter
-  const filteredParticulars = useMemo(() => {
-    return particulars.filter((item) => {
+  // Search & Filter supporting DB schema fields and sheet headers
+  const filteredDistricts = useMemo(() => {
+    return districts.filter((item) => {
       const q = searchTerm.toLowerCase()
-      const code = (item.code || '').toLowerCase()
-      const name = (item.name || '').toLowerCase()
-      const type = (item.type || '').toLowerCase()
-      const description = (item.description || '').toLowerCase()
+      const storeNumber = String(item.mdt_store_number || item.code || '').toLowerCase()
+      const storeName = String(item.mdt_store_name || item.name || '').toLowerCase()
+      const region = String(item.mdt_region || item.region || '').toLowerCase()
+      const cityProvince = String(item.mdt_city_province || '').toLowerCase()
 
       const matchesSearch =
-        code.includes(q) || name.includes(q) || type.includes(q) || description.includes(q)
+        storeNumber.includes(q) ||
+        storeName.includes(q) ||
+        region.includes(q) ||
+        cityProvince.includes(q)
 
-      const currentStatus = (item.status || 'ACTIVE').toUpperCase()
+      const currentStatus = (item.mdt_status || item.status || 'ACTIVE').toUpperCase()
       const matchesStatus = statusFilter === 'ALL' || currentStatus === statusFilter
 
       return matchesSearch && matchesStatus
     })
-  }, [particulars, searchTerm, statusFilter])
+  }, [districts, searchTerm, statusFilter])
 
-  // CSV Export Handler
+  // CSV Export Handler - Maps directly to DB column names
   const handleExportCSV = useCallback(() => {
     const exportItems =
       selectedIds.length > 0
-        ? particulars.filter((p) => selectedIds.includes(p.id))
-        : filteredParticulars
+        ? districts.filter((d) => selectedIds.includes(d.mdt_id || d.id))
+        : filteredDistricts
 
     if (!exportItems.length) return
 
-    const headers = ['code', 'name', 'type', 'description', 'status']
+    const headers = ['STORE NO.', 'STORE NAME', 'REGION', 'CITY PROVINCE', 'STATUS']
     const csvRows = [
       headers.join(','),
       ...exportItems.map((item) =>
         [
-          `"${item.code || ''}"`,
-          `"${item.name || ''}"`,
-          `"${item.type || ''}"`,
-          `"${(item.description || '').replace(/"/g, '""')}"`,
-          `"${item.status || 'ACTIVE'}"`,
+          `"${item.mdt_store_number || item.code || ''}"`,
+          `"${(item.mdt_store_name || item.name || '').replace(/"/g, '""')}"`,
+          `"${(item.mdt_region || item.region || '').replace(/"/g, '""')}"`,
+          `"${(item.mdt_city_province || '').replace(/"/g, '""')}"`,
+          `"${item.mdt_status || item.status || 'ACTIVE'}"`,
         ].join(','),
       ),
     ]
@@ -100,14 +103,14 @@ export default function ParticularsPage() {
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.setAttribute('href', url)
-    link.setAttribute('download', `particulars_export_${new Date().toISOString().slice(0, 10)}.csv`)
+    link.setAttribute('download', `districts_export_${new Date().toISOString().slice(0, 10)}.csv`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
-  }, [selectedIds, particulars, filteredParticulars])
+  }, [selectedIds, districts, filteredDistricts])
 
-  // Helper to normalize and map raw row objects to Particular payload standard
-  const mapRowToParticular = useCallback((rowObj, idx) => {
+  // Helper to normalize and map raw row object keys to DB payload standard
+  const mapRowToDistrict = useCallback((rowObj, idx) => {
     const normalized = {}
     Object.keys(rowObj).forEach((k) => {
       const cleanKey = String(k)
@@ -117,26 +120,25 @@ export default function ParticularsPage() {
       normalized[cleanKey] = rowObj[k]
     })
 
-    const code =
-      normalized.code ||
-      normalized['particular code'] ||
-      normalized['item code'] ||
+    const storeNo =
+      normalized['store no.'] ||
+      normalized['store no'] ||
+      normalized['mdt_store_number'] ||
       normalized['code']
-    const name =
-      normalized.name ||
-      normalized['particular name'] ||
-      normalized['item name'] ||
-      normalized.particular
-    const type = normalized.type || normalized.category
-    const description = normalized.description || normalized.desc || normalized.details
-    const status = normalized.status
+    const storeName = normalized['store name'] || normalized['mdt_store_name'] || normalized['name']
+    const cityProvince =
+      normalized['city province'] ||
+      normalized['city/province'] ||
+      normalized['city_province'] ||
+      normalized['mdt_city_province']
+    const rawStatus = normalized['status'] || normalized['mdt_status']
 
     return {
-      code: code ? String(code).trim() : `P-${idx + 100}`,
-      name: name ? String(name).trim() : 'Unnamed Particular',
-      type: type ? String(type).trim() : 'General',
-      description: description ? String(description).trim() : '',
-      status: status ? String(status).trim().toUpperCase() : 'ACTIVE',
+      mdt_store_number: storeNo ? String(storeNo).trim() : `STORE-${idx + 100}`,
+      mdt_store_name: storeName ? String(storeName).trim() : 'Unnamed Store',
+      mdt_region: '',
+      mdt_city_province: cityProvince ? String(cityProvince).trim() : '',
+      mdt_status: rawStatus ? String(rawStatus).trim().toUpperCase() : 'ACTIVE',
     }
   }, [])
 
@@ -162,10 +164,10 @@ export default function ParticularsPage() {
               .filter((rowObj) =>
                 Object.values(rowObj).some((val) => val !== null && String(val).trim() !== ''),
               )
-              .map(mapRowToParticular)
+              .map(mapRowToDistrict)
 
             if (parsedItems.length > 0) {
-              await importParticulars(parsedItems)
+              await importDistricts(parsedItems)
             }
           } catch (err) {
             console.error('XLSX Import Error:', err)
@@ -175,7 +177,7 @@ export default function ParticularsPage() {
         }
         reader.readAsArrayBuffer(file)
       } else {
-        // CSV files via PapaParse
+        // Fallback for CSV files via PapaParse
         Papa.parse(file, {
           header: true,
           skipEmptyLines: 'greedy',
@@ -186,11 +188,11 @@ export default function ParticularsPage() {
               .filter((rowObj) =>
                 Object.values(rowObj).some((val) => val && String(val).trim() !== ''),
               )
-              .map(mapRowToParticular)
+              .map(mapRowToDistrict)
 
             try {
               if (parsedItems.length > 0) {
-                await importParticulars(parsedItems)
+                await importDistricts(parsedItems)
               }
             } catch (err) {
               console.error('CSV Import Error:', err)
@@ -205,10 +207,10 @@ export default function ParticularsPage() {
         })
       }
     },
-    [importParticulars, mapRowToParticular],
+    [importDistricts, mapRowToDistrict],
   )
 
-  const columns = useMemo(() => createParticularsColumns({ onEdit: handleEdit }), [handleEdit])
+  const columns = useMemo(() => createDistrictsColumns({ onEdit: handleEdit }), [handleEdit])
 
   return (
     <div className="w-full h-full flex-1 flex flex-col min-h-0 space-y-3 overflow-hidden">
@@ -225,10 +227,10 @@ export default function ParticularsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 shrink-0">
         <div>
           <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight">
-            Master Particulars
+            Master Districts & Stores
           </h1>
           <p className="text-slate-500 text-xs mt-0.5">
-            Manage disbursement categories, line items, codes, and description lookup entries.
+            Manage regional store divisions, district store numbers, branches, and locations.
           </p>
         </div>
 
@@ -256,24 +258,24 @@ export default function ParticularsPage() {
       {/* Metrics Banner */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
         <StatCard
-          title="Total Particulars"
+          title="Total Districts"
           value={metrics.total}
-          icon={Tags}
-          subtitle="Registered line items"
+          icon={MapPin}
+          subtitle="Registered store areas"
           variant="blue"
         />
         <StatCard
-          title="Active Items"
+          title="Active Districts"
           value={metrics.active}
           icon={CheckCircle2}
-          subtitle="Available for selection"
+          subtitle="Operational branches"
           variant="emerald"
         />
         <StatCard
-          title="Inactive Items"
+          title="Inactive Districts"
           value={metrics.inactive}
           icon={XCircle}
-          subtitle="Disabled or archived"
+          subtitle="Closed or pending"
           variant="amber"
         />
       </div>
@@ -284,7 +286,7 @@ export default function ParticularsPage() {
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search Code, Name, Type, Description..."
+            placeholder="Search Store No., Name, City/Province..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             className="w-full pl-8 pr-3 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
@@ -313,21 +315,21 @@ export default function ParticularsPage() {
         {isLoading ? (
           <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200/80 p-6">
             <Loader2 className="w-6 h-6 text-[#E31837] animate-spin mb-2" />
-            <p className="text-xs font-medium text-slate-500">Loading particulars...</p>
+            <p className="text-xs font-medium text-slate-500">Loading districts & stores...</p>
           </div>
         ) : error ? (
           <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-rose-200 p-6 text-center">
             <AlertCircle className="w-8 h-8 text-rose-500 mb-2" />
             <p className="text-sm font-bold text-slate-800">Error Loading Data</p>
             <p className="text-xs text-slate-500 mt-1 max-w-md">
-              {typeof error === 'string' ? error : error?.message || 'Failed to fetch particulars.'}
+              {typeof error === 'string' ? error : error?.message || 'Failed to fetch districts.'}
             </p>
           </div>
         ) : (
           <DataTable
             columns={columns}
-            data={filteredParticulars}
-            keyExtractor={(row) => row.id}
+            data={filteredDistricts}
+            keyExtractor={(row) => row.mdt_id || row.id}
             selectable={false}
             selectedRows={selectedIds}
             onSelectionChange={handleSelectionChange}
@@ -335,13 +337,13 @@ export default function ParticularsPage() {
             containerClassName="h-full flex flex-col min-h-0"
             emptyMessage={
               searchTerm || statusFilter !== 'ALL'
-                ? 'No particulars match your search parameters.'
-                : 'No particulars found. Import a CSV or XLSX file to populate entries.'
+                ? 'No districts or stores match your search parameters.'
+                : 'No districts found. Import a CSV or XLSX to populate entries.'
             }
             footer={
               <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
                 <span>
-                  Showing {filteredParticulars.length} entries
+                  Showing {filteredDistricts.length} entries
                   {selectedIds.length > 0 && ` (${selectedIds.length} selected)`}
                 </span>
                 <span>Fiscal Year 2026</span>
@@ -352,10 +354,10 @@ export default function ParticularsPage() {
       </div>
 
       {/* Edit Status Modal */}
-      <EditParticularsModal
+      <EditDistrictModal
         isOpen={isEditOpen}
         onClose={() => setIsEditOpen(false)}
-        particular={selectedParticular}
+        district={selectedDistrict}
         onUpdateStatus={updateStatus}
         isSubmitting={isSubmitting}
       />

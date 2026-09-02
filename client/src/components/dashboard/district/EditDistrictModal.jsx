@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Loader2, AlertCircle, Save } from 'lucide-react'
-import { Modal } from '../../../components/ui/Modal' // Adjust import path as needed
+import { Modal } from '../../../components/ui/Modal'
 
-export default function EditParticularsModal({
+export default function EditDistrictModal({
   isOpen,
   onClose,
-  particular,
+  district,
   onUpdateStatus,
   isSubmitting,
 }) {
@@ -13,19 +13,22 @@ export default function EditParticularsModal({
   const [errorMessage, setErrorMessage] = useState(null)
 
   useEffect(() => {
-    if (particular) {
-      setStatus((particular.status || 'ACTIVE').toUpperCase())
+    if (district) {
+      const currentStatus = district.mdt_status || district.status || 'ACTIVE'
+      setStatus(currentStatus.toUpperCase())
       setErrorMessage(null)
     }
-  }, [particular])
+  }, [district])
 
   const handleSubmit = useCallback(
     async (e) => {
       e.preventDefault()
       setErrorMessage(null)
 
+      const id = district?.mdt_id || district?.id
+
       const result = await onUpdateStatus?.({
-        id: particular?.id,
+        id,
         status,
       })
 
@@ -35,22 +38,23 @@ export default function EditParticularsModal({
         setErrorMessage(result?.message || 'Failed to update status.')
       }
     },
-    [particular, status, onUpdateStatus, onClose],
+    [district, status, onUpdateStatus, onClose],
   )
 
-  if (!isOpen || !particular) return null
+  if (!isOpen || !district) return null
 
-  const particularCode = particular.code || `P-${particular.id}`
-  const particularName = particular.name || 'Unnamed'
+  const storeNumber =
+    district.mdt_store_number || district.code || `ST-${district.mdt_id || district.id}`
+  const storeName = district.mdt_store_name || district.name || 'Unnamed Store'
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Edit Particular Status" maxWidth="max-w-md">
+    <Modal isOpen={isOpen} onClose={onClose} title="Edit District Status" maxWidth="max-w-md">
       <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Particular Metadata Card */}
+        {/* District Details Header Info */}
         <div className="p-2.5 bg-slate-50 border border-slate-200/80 rounded-lg">
-          <p className="text-[11px] font-medium text-slate-500">Particular Item</p>
+          <p className="text-[11px] font-medium text-slate-500">Store Information</p>
           <p className="text-xs font-bold text-slate-900 mt-0.5">
-            {particularCode} — {particularName}
+            Store No: {storeNumber} — {storeName}
           </p>
         </div>
 
@@ -61,7 +65,6 @@ export default function EditParticularsModal({
           </div>
         )}
 
-        {/* Status Select */}
         <div className="space-y-1.5">
           <label className="text-xs font-bold text-slate-700">Status</label>
           <select
