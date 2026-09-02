@@ -27,7 +27,7 @@ const initRoutes = (app) => {
   app.use('/master-routeaccess', masterRouteAccessRouter)
   app.use('/master-wallet', masterWalletRouter)
   app.use('/master-district', masterDistrictRouter)
-  app.use('/master-modeoftransportation', masterModeOfTransportationRouter)
+  app.use('/master-mode-of-transportation', masterModeOfTransportationRouter)
   app.use('/master-particulars', masterParticularsRouter)
   app.use('/budget-budget', budgetBudgetRouter)
   app.use('/revolving-fund', revolvingFundRouter)

@@ -4,7 +4,7 @@ const { Master } = require('../database/models/Master')
 const SQL = new SQLQueryBuilder()
 
 /**
- * @name UpsertMasterModeOfTransportation
+ * @name upsertMasterModeOfTransportation
  * @description Update and insert ModeOfTransportation
  */
 const upsertMasterModeOfTransportation = async (req, res) => {
@@ -32,43 +32,50 @@ const upsertMasterModeOfTransportation = async (req, res) => {
   //     description: 'ModeOfTransportation status'
   //   }
   */
-  
-  // Destructure only the non-system keys from req.body
+
   const { id, name, status } = req.body
-  
+  const userId = req.user?.id || req.session?.userId || null
   let query
 
   try {
     if (id) {
-      let updateData = {}
+      const updateData = {}
       if (name !== undefined) updateData[Master.ModeOfTransportation.cols.name] = name
       if (status !== undefined) updateData[Master.ModeOfTransportation.cols.status] = status
 
-      if (Master.ModeOfTransportation.cols.updatedAt) updateData[Master.ModeOfTransportation.cols.updatedAt] = new Date()
-      if (Master.ModeOfTransportation.cols.updatedBy) updateData[Master.ModeOfTransportation.cols.updatedBy] = userId
+      if (Master.ModeOfTransportation.cols.updatedAt) {
+        updateData[Master.ModeOfTransportation.cols.updatedAt] = new Date()
+      }
+      if (Master.ModeOfTransportation.cols.updatedBy && userId) {
+        updateData[Master.ModeOfTransportation.cols.updatedBy] = userId
+      }
 
       if (Object.keys(updateData).length === 0) {
-        return res.status(400).json({ message: 'No data to update' })
-      } else {
-        query = SQL.model(Master.ModeOfTransportation)
-          .update(updateData)
-          .where(Master.ModeOfTransportation.pk, id)
-          .build()
-      }
-    } else {
-      // Basic validation for inserts (modify as needed)
-      if (!name) {
-        return res.status(400).json({ message: 'Missing required fields' })
+        return res.status(400).json({ message: 'No data provided to update' })
       }
 
       query = SQL.model(Master.ModeOfTransportation)
-        .insert({
-          [Master.ModeOfTransportation.cols.name]: name,
-          [Master.ModeOfTransportation.cols.status]: status,
-          ...( Master.ModeOfTransportation.cols.createdBy ? { [Master.ModeOfTransportation.cols.createdBy]: userId } : {} ),
-          ...( Master.ModeOfTransportation.cols.createdAt ? { [Master.ModeOfTransportation.cols.createdAt]: new Date() } : {} ),
-        })
+        .update(updateData)
+        .where(Master.ModeOfTransportation.pk, id)
         .build()
+    } else {
+      if (!name) {
+        return res.status(400).json({ message: 'Missing required field: name' })
+      }
+
+      const insertData = {
+        [Master.ModeOfTransportation.cols.name]: name,
+        [Master.ModeOfTransportation.cols.status]: status || 'ACTIVE',
+      }
+
+      if (Master.ModeOfTransportation.cols.createdBy && userId) {
+        insertData[Master.ModeOfTransportation.cols.createdBy] = userId
+      }
+      if (Master.ModeOfTransportation.cols.createdAt) {
+        insertData[Master.ModeOfTransportation.cols.createdAt] = new Date()
+      }
+
+      query = SQL.model(Master.ModeOfTransportation).insert(insertData).build()
     }
 
     const result = await Query(query.sql, query.bindings)
@@ -77,11 +84,12 @@ const upsertMasterModeOfTransportation = async (req, res) => {
       return res.status(404).json({ message: 'ModeOfTransportation not found' })
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       message: id ? 'Updated successfully' : 'Created successfully',
+      data: { id: id || result.insertId },
     })
   } catch (error) {
-    console.log(error)
+    console.error('upsertMasterModeOfTransportation error:', error)
     return res.status(500).json({ message: 'Error processing ModeOfTransportation' })
   }
 }
@@ -100,21 +108,56 @@ const getMasterModeOfTransportation = async (req, res) => {
         Master.ModeOfTransportation.cols.id,
         Master.ModeOfTransportation.cols.name,
         Master.ModeOfTransportation.cols.status,
-        Master.ModeOfTransportation.cols.createdAt
+        Master.ModeOfTransportation.cols.createdAt,
       ])
-      // .where(Master.ModeOfTransportation.cols.companyId, companyId) // Uncomment if company-scoped
       .build()
 
     const result = await Query(sql, bindings)
 
-    return res.status(200).json(result)
+    return res.status(200).json({
+      status: 'SUCCESS',
+      data: result,
+    })
   } catch (error) {
-    console.log(error)
+    console.error('getMasterModeOfTransportation error:', error)
     return res.status(500).json({ message: 'Error retrieving ModeOfTransportation records' })
+  }
+}
+
+/**
+ * @name bulkImportMasterModeOfTransportation
+ * @description Bulk insert ModeOfTransportation records from CSV
+ */
+const bulkImportMasterModeOfTransportation = async (req, res) => {
+  // #swagger.tags = ['Master ModeOfTransportation']
+  // #swagger.description = 'Bulk import ModeOfTransportation records'
+
+  const { items } = req.body
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ message: 'Invalid or empty items array' })
+  }
+
+  const queries = items.map((item) => {
+    return SQL.model(Master.ModeOfTransportation)
+      .insert({
+        [Master.ModeOfTransportation.cols.name]: item.mmot_name || item.name,
+        [Master.ModeOfTransportation.cols.status]: item.mmot_status || item.status || 'ACTIVE',
+      })
+      .build()
+  })
+
+  try {
+    await Transaction(queries)
+    return res.status(201).json({ message: 'Successfully imported transportation records' })
+  } catch (error) {
+    console.error('bulkImportMasterModeOfTransportation error:', error)
+    return res.status(500).json({ message: 'Error performing bulk import' })
   }
 }
 
 module.exports = {
   getMasterModeOfTransportation,
-  upsertMasterModeOfTransportation
+  upsertMasterModeOfTransportation,
+  bulkImportMasterModeOfTransportation,
 }
