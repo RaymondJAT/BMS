@@ -8,17 +8,8 @@ import { masterUserApi } from '../api/masterUserApi'
 import { masterAccessApi } from '../api/masterAccessApi'
 
 /**
- * Central reference-data hook for Budget / Revolving Fund / Cash
+ * Central reference-data lookup hook for Budget / Revolving Fund / Cash
  * Disbursement / Cash Request / Liquidation / Master Files pages.
- *
- * Field names below match the confirmed backend response shapes:
- *   - master-department: { id, code, name, status, createdAt }
- *   - master-position:   { id, code, description, status, createdAt }
- *   - master-employee:   { id, employee_id, fullname, department_id,
- *                           department_name, position_id, position_name,
- *                           status, createdAt }
- *   - master-user:       { id, user_id, username, password, status,
- *                           employee_id, access_id, fullname, createdAt }
  */
 export function useCashDisbursementLookups() {
   const [revolvingFunds, setRevolvingFunds] = useState([])
@@ -108,12 +99,6 @@ export function useCashDisbursementLookups() {
     [particulars],
   )
 
-  /**
-   * revolving_fund rows only carry budget_id, not a department directly —
-   * the department comes from budget.department_id, one hop further out.
-   * Shows the budget's identity (department + fund type) as its "name",
-   * since budgets have no dedicated name field of their own.
-   */
   const getFundLabel = useCallback(
     (id) => {
       const fund = revolvingFunds.find((f) => String(f.id) === String(id))

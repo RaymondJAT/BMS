@@ -250,8 +250,9 @@ const DataTable = ({
                     {displayColumns.map((col, cIdx) => {
                       const alignClass = getAlignmentClass(col.align)
                       return (
-                        <td key={cIdx} className="py-2 px-3 align-middle">
-                          <div className={`flex items-center ${alignClass}`}>
+                        <td key={cIdx} className="py-2.5 px-3 align-top">
+                          {/* Changed items-center to items-start below */}
+                          <div className={`flex items-start ${alignClass}`}>
                             {col.cell
                               ? col.cell(row, rowKey)
                               : col.accessorKey

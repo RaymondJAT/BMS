@@ -1,21 +1,31 @@
 import { apiClient } from './axios'
 
-/**
- * ASSUMPTION — not yet verified against the actual master-particulars
- * controller. The cash-disbursement controller's getParticularsNameById
- * helper reads `mpt_name` directly via raw SQL, which confirms the DB
- * column name, but the REST endpoint's response shape (aliased keys) has
- * not been shared. This assumes { id, name, status, createdAt }, mirroring
- * the master-department pattern.
- *
- * If the real response uses different keys, only the field names accessed
- * in useCashDisbursementLookups.js need updating — this file itself is
- * shape-agnostic.
- */
 export const masterParticularsApi = {
   getAll: async () => {
     const response = await apiClient.get('/master-particulars')
     return response.data || []
+  },
+
+  upsert: async ({ id, code, name, type, description, status }) => {
+    const params = new URLSearchParams()
+    if (id) params.append('id', id)
+    if (code !== undefined) params.append('code', code)
+    if (name !== undefined) params.append('name', name)
+    if (type !== undefined) params.append('type', type)
+    if (description !== undefined) params.append('description', description)
+    if (status !== undefined) params.append('status', status)
+
+    const response = await apiClient.post('/master-particulars', params, {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    })
+    return response.data
+  },
+
+  importCSV: async (items) => {
+    const response = await apiClient.post('/master-particulars/import', items)
+    return response.data
   },
 }
 

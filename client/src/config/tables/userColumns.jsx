@@ -55,7 +55,7 @@ export const createUserColumns = ({ onEdit, rolesMap = {} }) => [
     cell: (row) => (
       <div className="flex items-center gap-1.5 text-xs text-slate-600 font-medium">
         <IdCard className="w-3.5 h-3.5 text-slate-400" />
-        <span>{row.employee_id ? `#${row.employee_id}` : '—'}</span>
+        <span>{row.employee_id ? `${row.employee_id}` : '—'}</span>
       </div>
     ),
   },
