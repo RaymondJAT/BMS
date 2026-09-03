@@ -26,7 +26,7 @@ export const NAVIGATION_ITEMS = [
     children: [
       { id: 'master-access', title: 'User Access & Permissions', to: '/master/access' },
       { id: 'master-users', title: 'Users', to: '/master/users' },
-      { id: 'master-route-access', title: 'Route Access', to: '/master/route-access' },
+      { id: 'master-route-access', title: 'Route Access', to: '/master/routeAccess' },
       { id: 'master-departments', title: 'Departments', to: '/master/departments' },
       // { id: 'master-positions', title: 'Positions', to: '/master/positions' },
       { id: 'master-employees', title: 'Employees', to: '/master/employees' },

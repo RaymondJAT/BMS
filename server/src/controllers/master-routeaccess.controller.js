@@ -38,10 +38,11 @@ const upsertMasterRouteAccess = async (req, res) => {
   //     description: 'RouteAccess status'
   //   }
   */
-  
-  // Destructure only the non-system keys from req.body
+
+  // Extract non-system keys from req.body
   const { id, access_id, name, status } = req.body
-  
+  const userId = req.user?.id || req.userId || null
+
   let query
 
   try {
@@ -51,7 +52,8 @@ const upsertMasterRouteAccess = async (req, res) => {
       if (name !== undefined) updateData[Master.RouteAccess.cols.name] = name
       if (status !== undefined) updateData[Master.RouteAccess.cols.status] = status
 
-      if (Master.RouteAccess.cols.updatedAt) updateData[Master.RouteAccess.cols.updatedAt] = new Date()
+      if (Master.RouteAccess.cols.updatedAt)
+        updateData[Master.RouteAccess.cols.updatedAt] = new Date()
       if (Master.RouteAccess.cols.updatedBy) updateData[Master.RouteAccess.cols.updatedBy] = userId
 
       if (Object.keys(updateData).length === 0) {
@@ -63,8 +65,8 @@ const upsertMasterRouteAccess = async (req, res) => {
           .build()
       }
     } else {
-      // Basic validation for inserts (modify as needed)
-      if (!access_id) {
+      // Basic validation for inserts
+      if (!access_id && !name) {
         return res.status(400).json({ message: 'Missing required fields' })
       }
 
@@ -73,8 +75,12 @@ const upsertMasterRouteAccess = async (req, res) => {
           [Master.RouteAccess.cols.access_id]: access_id,
           [Master.RouteAccess.cols.name]: name,
           [Master.RouteAccess.cols.status]: status,
-          ...( Master.RouteAccess.cols.createdBy ? { [Master.RouteAccess.cols.createdBy]: userId } : {} ),
-          ...( Master.RouteAccess.cols.createdAt ? { [Master.RouteAccess.cols.createdAt]: new Date() } : {} ),
+          ...(Master.RouteAccess.cols.createdBy
+            ? { [Master.RouteAccess.cols.createdBy]: userId }
+            : {}),
+          ...(Master.RouteAccess.cols.createdAt
+            ? { [Master.RouteAccess.cols.createdAt]: new Date() }
+            : {}),
         })
         .build()
     }
@@ -85,11 +91,11 @@ const upsertMasterRouteAccess = async (req, res) => {
       return res.status(404).json({ message: 'RouteAccess not found' })
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       message: id ? 'Updated successfully' : 'Created successfully',
     })
   } catch (error) {
-    console.log(error)
+    console.error(error)
     return res.status(500).json({ message: 'Error processing RouteAccess' })
   }
 }
@@ -109,21 +115,20 @@ const getMasterRouteAccess = async (req, res) => {
         Master.RouteAccess.cols.access_id,
         Master.RouteAccess.cols.name,
         Master.RouteAccess.cols.status,
-        Master.RouteAccess.cols.createdAt
+        Master.RouteAccess.cols.createdAt,
       ])
-      // .where(Master.RouteAccess.cols.companyId, companyId) // Uncomment if company-scoped
       .build()
 
     const result = await Query(sql, bindings)
 
     return res.status(200).json(result)
   } catch (error) {
-    console.log(error)
+    console.error(error)
     return res.status(500).json({ message: 'Error retrieving RouteAccess records' })
   }
 }
 
 module.exports = {
   getMasterRouteAccess,
-  upsertMasterRouteAccess
+  upsertMasterRouteAccess,
 }

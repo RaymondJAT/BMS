@@ -6,6 +6,7 @@ import { masterEmployeeApi } from '../api/masterEmployeeApi'
 import { masterParticularsApi } from '../api/masterParticularsApi'
 import { masterUserApi } from '../api/masterUserApi'
 import { masterAccessApi } from '../api/masterAccessApi'
+import { routeAccessApi } from '../api/routeAccessApi'
 
 /**
  * Central reference-data lookup hook for Budget / Revolving Fund / Cash
@@ -19,6 +20,7 @@ export function useCashDisbursementLookups() {
   const [particulars, setParticulars] = useState([])
   const [users, setUsers] = useState([])
   const [accessRoles, setAccessRoles] = useState([])
+  const [routeAccess, setRouteAccess] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -26,7 +28,7 @@ export function useCashDisbursementLookups() {
     setIsLoading(true)
     setError(null)
     try {
-      const [rfRes, budgetRes, deptRes, empRes, partRes, userRes, accessRes] =
+      const [rfRes, budgetRes, deptRes, empRes, partRes, userRes, accessRes, routeAccessRes] =
         await Promise.allSettled([
           revolvingFundApi.getAll(),
           budgetApi.getAll(),
@@ -35,6 +37,7 @@ export function useCashDisbursementLookups() {
           masterParticularsApi.getAll(),
           masterUserApi.getAll(),
           masterAccessApi?.getAll ? masterAccessApi.getAll() : Promise.resolve([]),
+          routeAccessApi.getAll(),
         ])
 
       const unwrap = (res) => {
@@ -50,6 +53,7 @@ export function useCashDisbursementLookups() {
       setParticulars(unwrap(partRes))
       setUsers(unwrap(userRes))
       setAccessRoles(unwrap(accessRes))
+      setRouteAccess(unwrap(routeAccessRes))
     } catch (err) {
       console.error('Failed to fetch cash disbursement lookups:', err)
       setError('Failed to load reference data.')
@@ -121,6 +125,7 @@ export function useCashDisbursementLookups() {
     particulars,
     users,
     rolesMap,
+    routeAccess,
     isLoading,
     error,
     refetch: fetchAll,
