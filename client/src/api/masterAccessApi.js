@@ -1,22 +1,23 @@
 import { apiClient } from './axios'
 
-/**
- * ASSUMPTION — temporary mock placeholder pending actual master-access controller.
- * Maps role ID to access names: { id, name }
- */
 export const masterAccessApi = {
+  /**
+   * Fetch all master access records
+   * Endpoint: GET /master-access
+   */
   getAll: async () => {
-    try {
-      const response = await apiClient.get('/master-access')
-      return response.data || []
-    } catch {
-      // Fallback mock roles map until backend endpoint is built
-      return [
-        { id: 1, name: 'Super Admin' },
-        { id: 2, name: 'Disbursement Encoder' },
-        { id: 3, name: 'Finance Approver' },
-      ]
-    }
+    const response = await apiClient.get('/master-access')
+    return response.data || []
+  },
+
+  /**
+   * Insert or update an access role record
+   * Endpoint: POST /master-access
+   * @param {Object} payload - { id (optional), name, status }
+   */
+  upsert: async (payload) => {
+    const response = await apiClient.post('/master-access', payload)
+    return response.data
   },
 }
 

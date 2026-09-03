@@ -69,8 +69,8 @@ export function useCashDisbursementLookups() {
   // id -> role name, for resolving a user's access_id to a display label.
   const rolesMap = useMemo(() => {
     return accessRoles.reduce((acc, role) => {
-      const id = role.id ?? role.access_id ?? role.role_id
-      const name = role.name || role.role_name || role.access_name
+      const id = role.ma_id ?? role.id ?? role.access_id ?? role.role_id
+      const name = role.ma_name || role.name || role.role_name || role.access_name
       if (id != null && name) {
         acc[id] = name
         acc[String(id)] = name
@@ -81,37 +81,39 @@ export function useCashDisbursementLookups() {
 
   const getDepartmentName = useCallback(
     (id) => {
-      const match = departments.find((d) => String(d.id) === String(id))
-      return match?.name || `Department #${id ?? 'N/A'}`
+      const match = departments.find((d) => String(d.id || d.md_id) === String(id))
+      return match?.name || match?.md_name || `Department #${id ?? 'N/A'}`
     },
     [departments],
   )
 
   const getEmployeeName = useCallback(
     (id) => {
-      const match = employees.find((e) => String(e.id) === String(id))
-      return match?.fullname || `Employee #${id ?? 'N/A'}`
+      const match = employees.find((e) => String(e.id || e.me_id) === String(id))
+      return match?.fullname || match?.me_fullname || `Employee #${id ?? 'N/A'}`
     },
     [employees],
   )
 
   const getParticularsName = useCallback(
     (id) => {
-      const match = particulars.find((p) => String(p.id) === String(id))
-      return match?.name || match?.description || `Particulars #${id ?? 'N/A'}`
+      const match = particulars.find((p) => String(p.id || p.mp_id) === String(id))
+      return match?.name || match?.mp_name || match?.description || `Particulars #${id ?? 'N/A'}`
     },
     [particulars],
   )
 
   const getFundLabel = useCallback(
     (id) => {
-      const fund = revolvingFunds.find((f) => String(f.id) === String(id))
+      const fund = revolvingFunds.find((f) => String(f.id || f.rf_id) === String(id))
       if (!fund) return 'Unknown Fund'
 
-      const budget = budgets.find((b) => String(b.id) === String(fund.budget_id))
+      const budget = budgets.find(
+        (b) => String(b.id || b.b_id) === String(fund.budget_id || fund.rf_budget_id),
+      )
       if (!budget) return 'Unknown Fund'
 
-      const deptName = getDepartmentName(budget.department_id)
+      const deptName = getDepartmentName(budget.department_id || budget.b_department_id)
       return budget.type ? `${deptName} — ${budget.type}` : deptName
     },
     [revolvingFunds, budgets, getDepartmentName],
@@ -125,6 +127,7 @@ export function useCashDisbursementLookups() {
     particulars,
     users,
     rolesMap,
+    accessRoles,
     routeAccess,
     isLoading,
     error,
