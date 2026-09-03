@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { createAccessColumns } from '../../../config/tables/accessColumns'
 import EditAccessModal from '../../../components/dashboard/access/EditAccessModal'
+import EditPermissionModal from '../../../components/dashboard/access/EditPermissionModal'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
 import { masterAccessApi } from '../../../api/masterAccessApi'
 
@@ -27,9 +28,14 @@ function AccessPage() {
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [selectedIds, setSelectedIds] = useState([])
 
+  // State for Upsert Role Modal
   const [selectedAccess, setSelectedAccess] = useState(null)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // State for Route Permissions Modal
+  const [selectedPermissionAccess, setSelectedPermissionAccess] = useState(null)
+  const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false)
 
   // Load access list from lookup hook
   const { accessRoles = [], isLoading, error, refetch } = useCashDisbursementLookups()
@@ -44,10 +50,24 @@ function AccessPage() {
     setIsModalOpen(true)
   }, [])
 
+  const handleEditPermissions = useCallback((row) => {
+    setSelectedPermissionAccess(row)
+    setIsPermissionModalOpen(true)
+  }, [])
+
   const handleCloseModal = useCallback(() => {
     setIsModalOpen(false)
     setSelectedAccess(null)
   }, [])
+
+  const handleClosePermissionModal = useCallback(() => {
+    setIsPermissionModalOpen(false)
+    setSelectedPermissionAccess(null)
+  }, [])
+
+  const handlePermissionsUpdated = useCallback(async () => {
+    if (refetch) await refetch()
+  }, [refetch])
 
   const handleUpsertAccess = useCallback(
     async (payload) => {
@@ -97,7 +117,18 @@ function AccessPage() {
     })
   }, [accessRoles, searchTerm, statusFilter])
 
-  const columns = useMemo(() => createAccessColumns({ onEdit: handleEdit }), [handleEdit])
+  // NOTE: accessColumns.jsx's createAccessColumns expects an `onPermissions`
+  // prop (that's what the key-icon button calls) — the previous version of
+  // this file passed `onEditPermissions`, which accessColumns.jsx never
+  // reads, so the button silently did nothing. Fixed here.
+  const columns = useMemo(
+    () =>
+      createAccessColumns({
+        onEdit: handleEdit,
+        onPermissions: handleEditPermissions,
+      }),
+    [handleEdit, handleEditPermissions],
+  )
 
   return (
     <div className="w-full h-full flex-1 flex flex-col min-h-0 space-y-3 overflow-hidden">
@@ -231,7 +262,7 @@ function AccessPage() {
         )}
       </div>
 
-      {/* Modal */}
+      {/* Edit/Create Role Modal */}
       {isModalOpen && (
         <EditAccessModal
           isOpen={isModalOpen}
@@ -239,6 +270,16 @@ function AccessPage() {
           accessData={selectedAccess}
           onUpsert={handleUpsertAccess}
           isSubmitting={isSubmitting}
+        />
+      )}
+
+      {/* Edit Route Permissions Modal */}
+      {isPermissionModalOpen && (
+        <EditPermissionModal
+          isOpen={isPermissionModalOpen}
+          onClose={handleClosePermissionModal}
+          accessData={selectedPermissionAccess}
+          onRoutesUpdated={handlePermissionsUpdated}
         />
       )}
     </div>

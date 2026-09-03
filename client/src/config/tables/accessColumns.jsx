@@ -1,4 +1,4 @@
-import { Edit, ShieldCheck, ShieldAlert, Calendar } from 'lucide-react'
+import { Edit, ShieldCheck, Calendar, Key } from 'lucide-react'
 
 const formatDate = (dateString) => {
   if (!dateString) return '—'
@@ -13,7 +13,7 @@ const formatDate = (dateString) => {
 
 const getItem = (rowOrItem) => rowOrItem?.row?.original || rowOrItem || {}
 
-export const createAccessColumns = ({ onEdit }) => [
+export const createAccessColumns = ({ onEdit, onPermissions }) => [
   {
     header: 'Access Role',
     accessorKey: 'ma_name',
@@ -53,17 +53,12 @@ export const createAccessColumns = ({ onEdit }) => [
 
       return (
         <span
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold tracking-wide whitespace-nowrap ${
+          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold tracking-wide whitespace-nowrap ${
             isActive
               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
               : 'bg-rose-50 text-rose-700 border border-rose-200'
           }`}
         >
-          {isActive ? (
-            <ShieldCheck className="w-3 h-3 text-emerald-600" />
-          ) : (
-            <ShieldAlert className="w-3 h-3 text-rose-600" />
-          )}
           {status}
         </span>
       )
@@ -74,7 +69,7 @@ export const createAccessColumns = ({ onEdit }) => [
     accessorKey: 'ma_createdAt',
     sortable: true,
     align: 'center',
-    width: 'w-4/12',
+    width: 'w-3/12',
     cell: (cellProps) => {
       const item = getItem(cellProps)
       const createdAt = item.ma_createdAt || item.createdAt
@@ -91,12 +86,23 @@ export const createAccessColumns = ({ onEdit }) => [
     header: 'Actions',
     id: 'actions',
     align: 'center',
-    width: 'w-1/12',
+    width: 'w-2/12',
     cell: (cellProps) => {
       const item = getItem(cellProps)
 
       return (
-        <div className="flex items-center justify-center whitespace-nowrap w-full">
+        <div className="flex items-center justify-center gap-1 whitespace-nowrap w-full">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onPermissions?.(item)
+            }}
+            className="p-1 text-slate-600 hover:text-[#E31837] hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
+            title="Manage Route Permissions"
+          >
+            <Key className="w-3.5 h-3.5" />
+          </button>
           <button
             type="button"
             onClick={(e) => {
