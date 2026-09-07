@@ -56,6 +56,7 @@
  * @property {'mra_id'} id
  * @property {'mra_access_id'} access_id
  * @property {'mra_name'} name
+ * @property {'mra_permission'} permission
  * @property {'mra_status'} status
  * @property {'mra_createdAt'} createdAt
  */
@@ -195,11 +196,12 @@ const Master = {
       id: 'mra_id',
       access_id: 'mra_access_id',
       name: 'mra_name',
+      permission: 'mra_permission',
       status: 'mra_status',
       createdAt: 'mra_createdAt',
     },
-    select: ['mra_id', 'mra_access_id', 'mra_name', 'mra_status', 'mra_createdAt'],
-    insert: ['mra_access_id', 'mra_name', 'mra_status'],
+    select: ['mra_id', 'mra_access_id', 'mra_name', 'mra_permission', 'mra_status', 'mra_createdAt'],
+    insert: ['mra_access_id', 'mra_name', 'mra_permission', 'mra_status'],
   },
   Wallet: {
     table: 'master_wallet',

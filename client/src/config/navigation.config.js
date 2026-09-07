@@ -58,25 +58,25 @@ export const NAVIGATION_ITEMS = [
     ],
   },
   // FINANCE & CASH FLOW
-  {
-    id: 'finance',
-    title: 'Finance & Cash Flow',
-    type: 'dropdown',
-    icon: FileCheck2,
-    children: [
-      // Access: Finance, Admin (Final financial sign-off before/after custodian)
-      { id: 'fin-pending', title: 'Pending Final Approvals', to: '/finance/pending' },
+  // {
+  //   id: 'finance',
+  //   title: 'Finance & Cash Flow',
+  //   type: 'dropdown',
+  //   icon: FileCheck2,
+  //   children: [
+  //     // Access: Finance, Admin (Final financial sign-off before/after custodian)
+  //     { id: 'fin-pending', title: 'Pending Final Approvals', to: '/finance/pending' },
 
-      // Access: Finance, Admin (Final validated liquidations)
-      { id: 'fin-completed', title: 'Completed Liquidations', to: '/finance/completed' },
+  //     // Access: Finance, Admin (Final validated liquidations)
+  //     { id: 'fin-completed', title: 'Completed Liquidations', to: '/finance/completed' },
 
-      // Access: Finance, Admin
-      { id: 'fin-rejected', title: 'Rejected Liquidations', to: '/finance/rejected' },
+  //     // Access: Finance, Admin
+  //     { id: 'fin-rejected', title: 'Rejected Liquidations', to: '/finance/rejected' },
 
-      // Access: Finance, Admin (Master transaction list)
-      { id: 'fin-all', title: 'All Cash Requests', to: '/finance/all-cash-requests' },
-    ],
-  },
+  //     // Access: Finance, Admin (Master transaction list)
+  //     { id: 'fin-all', title: 'All Cash Requests', to: '/finance/all-cash-requests' },
+  //   ],
+  // },
   // MY WORKBENCH
   {
     id: 'my-workbench',
@@ -95,30 +95,30 @@ export const NAVIGATION_ITEMS = [
     ],
   },
   // DISBURSEMENTS
-  {
-    id: 'disbursements',
-    title: 'Disbursements',
-    type: 'dropdown',
-    icon: Banknote,
-    children: [
-      // Access: Custodian, Admin (Releasing cash for approved requests)
-      { id: 'disb-processing', title: 'For Processing', to: '/disbursements/processing' },
+  // {
+  //   id: 'disbursements',
+  //   title: 'Disbursements',
+  //   type: 'dropdown',
+  //   icon: Banknote,
+  //   children: [
+  //     // Access: Custodian, Admin (Releasing cash for approved requests)
+  //     { id: 'disb-processing', title: 'For Processing', to: '/disbursements/processing' },
 
-      // Access: Custodian, Admin (Checking/verifying physical receipts)
-      {
-        id: 'disb-verification',
-        title: 'Liquidation Verification',
-        to: '/disbursements/verification',
-      },
+  //     // Access: Custodian, Admin (Checking/verifying physical receipts)
+  //     {
+  //       id: 'disb-verification',
+  //       title: 'Liquidation Verification',
+  //       to: '/disbursements/verification',
+  //     },
 
-      // Access: Custodian, Finance, Admin (Audit log of released funds)
-      {
-        id: 'disb-history',
-        title: 'Disbursement History',
-        to: '/disbursements/disbursement-history',
-      },
-    ],
-  },
+  //     // Access: Custodian, Finance, Admin (Audit log of released funds)
+  //     {
+  //       id: 'disb-history',
+  //       title: 'Disbursement History',
+  //       to: '/disbursements/disbursement-history',
+  //     },
+  //   ],
+  // },
   // REPORTS & LOGS
   {
     id: 'reports',

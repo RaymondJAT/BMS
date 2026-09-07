@@ -11,7 +11,6 @@ const formatDate = (dateString) => {
   })
 }
 
-// Helper function to extract row data regardless of DataTable prop structure
 const getItem = (rowOrItem) => rowOrItem?.row?.original || rowOrItem || {}
 
 export const createRouteColumns = ({ onEdit }) => [
@@ -49,15 +48,15 @@ export const createRouteColumns = ({ onEdit }) => [
     width: 'w-3/12',
     cell: (cellProps) => {
       const item = getItem(cellProps)
-      const status = (item.mra_status || item.status || 'NO-ACCESS').toUpperCase()
-      const isFullAccess = status === 'FULL-ACCESS'
+      const status = (item.mra_status || item.status || 'INACTIVE').toUpperCase()
+      const isActive = status === 'ACTIVE'
 
       return (
         <span
           className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold tracking-wide whitespace-nowrap ${
-            isFullAccess
+            isActive
               ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-              : 'bg-rose-50 text-rose-700 border border-rose-200'
+              : 'bg-slate-100 text-slate-600 border border-slate-200'
           }`}
         >
           {status}

@@ -8,12 +8,12 @@ export default function EditRouteAccessModal({
   onUpdateStatus,
   isSubmitting,
 }) {
-  const [status, setStatus] = useState('NO-ACCESS')
+  const [status, setStatus] = useState('INACTIVE')
   const [formError, setFormError] = useState(null)
 
   useEffect(() => {
     if (routeAccess) {
-      setStatus(routeAccess.mra_status || routeAccess.status || 'NO-ACCESS')
+      setStatus(routeAccess.mra_status || routeAccess.status || 'INACTIVE')
     }
     setFormError(null)
   }, [routeAccess, isOpen])
@@ -68,15 +68,15 @@ export default function EditRouteAccessModal({
 
         <div>
           <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">
-            Access Status
+            Status
           </label>
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
             className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all cursor-pointer"
           >
-            <option value="FULL-ACCESS">FULL-ACCESS</option>
-            <option value="NO-ACCESS">NO-ACCESS</option>
+            <option value="ACTIVE">ACTIVE</option>
+            <option value="INACTIVE">INACTIVE</option>
           </select>
         </div>
 

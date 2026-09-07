@@ -50,7 +50,7 @@ function LoginPage() {
     <div className="min-h-screen w-full flex items-center justify-center bg-slate-100/80 p-3 sm:p-6 lg:p-8 antialiased">
       {/* Container: Stacked on Mobile/Tablet, 2-Column Grid on Desktop */}
       <div className="w-full max-w-md lg:max-w-4xl bg-white rounded-2xl shadow-xl border border-slate-200/80 overflow-hidden flex flex-col lg:grid lg:grid-cols-2">
-        {/* Sign In Form (Order 1 on Mobile/Tablet, Order 2 on Desktop) */}
+        {/* Sign In Form */}
         <div className="order-1 lg:order-2 p-6 sm:p-8 lg:p-10 flex flex-col justify-center bg-white">
           <div className="mb-6">
             <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">

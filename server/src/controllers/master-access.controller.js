@@ -1,48 +1,30 @@
-const { v4: uuidv4 } = require('uuid')
-const { Query, Transaction, SQLQueryBuilder } = require('../database/utilities/queries.util')
+const { Query, SQLQueryBuilder } = require('../database/utilities/queries.util')
 const { Master } = require('../database/models/Master')
 const SQL = new SQLQueryBuilder()
 
 /**
- * @name UpsertMasterAccess
- * @description Update and insert Access
+ * @name upsertMasterAccess
+ * @description Create or update an Access Role record.
  */
 const upsertMasterAccess = async (req, res) => {
   // #swagger.tags = ['Master Access']
-  // #swagger.description = 'Upsert Access'
+  // #swagger.description = 'Create or update an Access Role (e.g. Requester, Team Leader, Fund Custodian, Finance, Administrator).'
   // #swagger.autoBody = false
-  // #swagger.consumes = ['application/x-www-form-urlencoded']
-  /* 
-  //   #swagger.parameters['id'] = {
-  //     in: 'formData',
-  //     type: 'string',
-  //     required: false,
-  //     description: 'Access id'
-  //   }
-  //   #swagger.parameters['name'] = {
-  //     in: 'formData',
-  //     type: 'string',
-  //     required: false,
-  //     description: 'Access name'
-  //   }
-  //   #swagger.parameters['status'] = {
-  //     in: 'formData',
-  //     type: 'string',
-  //     required: false,
-  //     description: 'Access status'
-  //   }
+  // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
+  /*
+    #swagger.parameters['id'] = { in: 'formData', type: 'integer', required: false, description: 'Access role id — omit to create, include to update' }
+    #swagger.parameters['name'] = { in: 'formData', type: 'string', required: true, description: 'Access role name' }
+    #swagger.parameters['status'] = { in: 'formData', type: 'string', required: false, description: 'ACTIVE or INACTIVE, defaults to ACTIVE on create' }
   */
 
-  // Destructure only the non-system keys from req.body
   const { id, name, status } = req.body
-
   const userId = req.userId || req.user?.id || 1
 
   let query
 
   try {
     if (id) {
-      let updateData = {}
+      const updateData = {}
       if (name !== undefined) updateData[Master.Access.cols.name] = name
       if (status !== undefined) updateData[Master.Access.cols.status] = status
 
@@ -51,9 +33,8 @@ const upsertMasterAccess = async (req, res) => {
 
       if (Object.keys(updateData).length === 0) {
         return res.status(400).json({ message: 'No data to update' })
-      } else {
-        query = SQL.model(Master.Access).update(updateData).where(Master.Access.pk, id).build()
       }
+      query = SQL.model(Master.Access).update(updateData).where(Master.Access.pk, id).build()
     } else {
       if (!name) {
         return res.status(400).json({ message: 'Missing required fields' })
@@ -72,25 +53,25 @@ const upsertMasterAccess = async (req, res) => {
     const result = await Query(query.sql, query.bindings)
 
     if (id && result.affectedRows === 0) {
-      return res.status(404).json({ message: 'Access not found' })
+      return res.status(404).json({ message: 'Access role not found' })
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       message: id ? 'Updated successfully' : 'Created successfully',
     })
   } catch (error) {
-    console.log(error)
-    return res.status(500).json({ message: 'Error processing Access' })
+    console.error('Error in upsertMasterAccess:', error)
+    return res.status(500).json({ message: 'Error processing Access record' })
   }
 }
 
 /**
  * @name getMasterAccess
- * @description Get all Access records
+ * @description Get all Access Role records.
  */
 const getMasterAccess = async (req, res) => {
   // #swagger.tags = ['Master Access']
-  // #swagger.description = 'Get all Access records'
+  // #swagger.description = 'Get all Access Role records.'
 
   try {
     const { sql, bindings } = SQL.model(Master.Access)
@@ -100,14 +81,13 @@ const getMasterAccess = async (req, res) => {
         Master.Access.cols.status,
         Master.Access.cols.createdAt,
       ])
-      // .where(Master.Access.cols.companyId, companyId) // Uncomment if company-scoped
       .build()
 
     const result = await Query(sql, bindings)
 
     return res.status(200).json(result)
   } catch (error) {
-    console.log(error)
+    console.error('Error in getMasterAccess:', error)
     return res.status(500).json({ message: 'Error retrieving Access records' })
   }
 }

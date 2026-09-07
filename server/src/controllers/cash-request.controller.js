@@ -454,6 +454,21 @@ const rejectCashRequest = async (req, res) => {
  *              by an edit.
  */
 const updateCashRequest = async (req, res) => {
+  // #swagger.tags = ['Cash Request']
+  // #swagger.description = 'Requester edits their own PENDING or REJECTED Cash Request. Always resets status to PENDING and re-enters the Team Leader queue.'
+  // #swagger.autoBody = false
+  // #swagger.consumes = ['application/x-www-form-urlencoded', 'application/json']
+  /*
+    #swagger.parameters['id'] = { in: 'formData', type: 'integer', required: true, description: 'Cash request id' }
+    #swagger.parameters['project'] = { in: 'formData', type: 'string', required: false, description: 'Project this request is charged against' }
+    #swagger.parameters['purpose'] = { in: 'formData', type: 'string', required: false, description: 'Purpose of the request' }
+    #swagger.parameters['amount'] = { in: 'formData', type: 'number', required: false, description: 'Requested amount' }
+    #swagger.parameters['employee_id'] = { in: 'formData', type: 'integer', required: false, description: 'Requesting employee id (master_employee.me_id)' }
+    #swagger.parameters['department_id'] = { in: 'formData', type: 'integer', required: false, description: 'Department id (master_department.md_id)' }
+    #swagger.parameters['team_lead'] = { in: 'formData', type: 'string', required: false, description: 'Team lead name/identifier responsible for approval' }
+    #swagger.parameters['request_date'] = { in: 'formData', type: 'string', required: false, description: 'Request date' }
+  */
+
   const userId = req.userId || req.user?.id || 1
   const { id, project, purpose, amount, employee_id, department_id, team_lead, request_date } =
     req.body
@@ -790,6 +805,13 @@ const completeCashRequest = async (req, res) => {
  *              builder doesn't support.
  */
 const getCashRequest = async (req, res) => {
+  // #swagger.tags = ['Cash Request']
+  // #swagger.description = 'Get Cash Request records, optionally filtered by status or employee_id. Includes joined disbursement and liquidation info.'
+  /*
+    #swagger.parameters['status'] = { in: 'query', type: 'string', required: false, description: 'Filter by cash request status (PENDING, APPROVED, REJECTED, COMPLETED)' }
+    #swagger.parameters['employee_id'] = { in: 'query', type: 'integer', required: false, description: 'Filter by requesting employee id' }
+  */
+
   const { status, employee_id } = req.query
 
   try {

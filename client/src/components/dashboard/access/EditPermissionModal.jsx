@@ -31,17 +31,17 @@ export default function EditPermissionModal({ isOpen, onClose, accessData, onRou
     setLoading(true)
     setErrorMessage(null)
     try {
-      // Backend already merges the full route catalog with this role's
-      // stored permissions, defaulting anything missing to NO-ACCESS —
-      // and forces FULL-ACCESS across the board if this role is protected.
+      // Backend merges the full route catalog with this role's stored
+      // permissions, defaulting anything missing to NO-ACCESS, and forces
+      // FULL-ACCESS across the board if this role is protected.
       const merged = await routeAccessApi.getPermissionsForAccess(id)
 
       const routesWithPermissions = merged.map((row) => ({
         key: row.name, // route name is the stable identifier in this schema
         id: row.id, // existing master_route_access row id, or null if unset
         name: row.name,
-        permission: row.status,
-        originalPermission: row.status,
+        permission: row.permission,
+        originalPermission: row.permission,
       }))
 
       setRoutes(routesWithPermissions)
@@ -115,7 +115,7 @@ export default function EditPermissionModal({ isOpen, onClose, accessData, onRou
           id: route.id || undefined,
           access_id: accessId,
           name: route.name,
-          status: route.permission,
+          permission: route.permission,
         }),
       )
 

@@ -8,7 +8,7 @@ import {
   FileSpreadsheet,
   Shield,
   ShieldCheck,
-  ShieldAlert,
+  ShieldOff,
   Loader2,
   AlertCircle,
 } from 'lucide-react'
@@ -30,7 +30,6 @@ function RouteAccessPage() {
   const [isEditOpen, setIsEditOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
 
-  // Load route access list from central lookup hook
   const { routeAccess = [], isLoading, error, refetch } = useCashDisbursementLookups()
 
   const handleEdit = useCallback((row) => {
@@ -44,7 +43,11 @@ function RouteAccessPage() {
   }, [])
 
   const handleUpdateStatus = useCallback(
-    async ({ id, status }) => {
+    async ({ status }) => {
+      const id = selectedRoute?.mra_id || selectedRoute?.id
+      if (!id) {
+        return { success: false, message: 'Could not determine which route to update.' }
+      }
       setIsSubmitting(true)
       try {
         await routeAccessApi.upsert({ id, status })
@@ -59,22 +62,24 @@ function RouteAccessPage() {
         setIsSubmitting(false)
       }
     },
-    [refetch],
+    [refetch, selectedRoute],
   )
 
   const handleSelectionChange = useCallback((keys) => {
     setSelectedIds(keys)
   }, [])
 
-  // Metrics counters for StatCards
+  // Metrics counters for StatCards — this page tracks ACTIVE/INACTIVE
+  // route entries, not FULL-ACCESS/NO-ACCESS (that's per-role and lives
+  // on the Access page's permission editor instead).
   const metrics = useMemo(() => {
     const total = routeAccess.length
-    const fullAccess = routeAccess.filter((r) => {
-      const status = r.mra_status || r.status || 'NO-ACCESS'
-      return String(status).toUpperCase() === 'FULL-ACCESS'
+    const active = routeAccess.filter((r) => {
+      const status = r.mra_status || r.status || 'INACTIVE'
+      return String(status).toUpperCase() === 'ACTIVE'
     }).length
-    const noAccess = total - fullAccess
-    return { total, fullAccess, noAccess }
+    const inactive = total - active
+    return { total, active, inactive }
   }, [routeAccess])
 
   // Search & Filter execution
@@ -84,7 +89,7 @@ function RouteAccessPage() {
       const name = (item.mra_name || item.name || '').toLowerCase()
 
       const matchesSearch = name.includes(q)
-      const currentStatus = (item.mra_status || item.status || 'NO-ACCESS').toUpperCase()
+      const currentStatus = (item.mra_status || item.status || 'INACTIVE').toUpperCase()
       const matchesStatus = statusFilter === 'ALL' || currentStatus === statusFilter
 
       return matchesSearch && matchesStatus
@@ -102,7 +107,7 @@ function RouteAccessPage() {
             Route Access
           </h1>
           <p className="text-slate-500 text-xs mt-0.5">
-            Manage system route accessibility and module permissions.
+            Manage which route entries are active in the system.
           </p>
         </div>
 
@@ -127,17 +132,17 @@ function RouteAccessPage() {
           variant="blue"
         />
         <StatCard
-          title="Full Access Routes"
-          value={metrics.fullAccess}
+          title="Active Routes"
+          value={metrics.active}
           icon={ShieldCheck}
-          subtitle="Accessible routes"
+          subtitle="Enabled in the system"
           variant="emerald"
         />
         <StatCard
-          title="No Access Routes"
-          value={metrics.noAccess}
-          icon={ShieldAlert}
-          subtitle="Restricted routes"
+          title="Inactive Routes"
+          value={metrics.inactive}
+          icon={ShieldOff}
+          subtitle="Disabled routes"
           variant="amber"
         />
       </div>
@@ -165,8 +170,8 @@ function RouteAccessPage() {
               className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer text-xs"
             >
               <option value="ALL">All Statuses</option>
-              <option value="FULL-ACCESS">FULL-ACCESS</option>
-              <option value="NO-ACCESS">NO-ACCESS</option>
+              <option value="ACTIVE">ACTIVE</option>
+              <option value="INACTIVE">INACTIVE</option>
             </select>
           </div>
         </div>

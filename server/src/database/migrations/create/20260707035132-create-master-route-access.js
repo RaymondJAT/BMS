@@ -25,9 +25,14 @@ module.exports = {
         type: Sequelize.STRING(300),
         allowNull: false,
       },
-      mra_status: {
+      mra_permission: {
         type: Sequelize.ENUM('FULL-ACCESS', 'NO-ACCESS'),
         defaultValue: 'NO-ACCESS',
+        allowNull: false,
+      },
+      mra_status: {
+        type: Sequelize.ENUM('ACTIVE', 'INACTIVE'),
+        defaultValue: 'INACTIVE',
         allowNull: false,
       },
       mra_createdAt: {
