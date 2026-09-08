@@ -16,21 +16,32 @@ require('dotenv').config()
 
 const auth = async (req, res, next) => {
   try {
-    let token = req.session.jwt
-    // console.log(req.session)
+    let token = req.session?.jwt
 
     if (!token && req.headers['authorization']) {
-      token = req.headers['authorization'].split(' ')[1]
+      const parts = req.headers['authorization'].split(' ')
+      token = parts.length === 2 ? parts[1] : parts[0]
     }
 
     if (!token) {
       return handleUnauthorized(req, res)
     }
 
-    const decodedUser = jwt.verify(token, process.env._SECRET_KEY)
+    const decodedUser = jwt.verify(token, process.env.SECRET_KEY)
 
     req.context = {
       ...decodedUser,
+    }
+
+    req.userId = decodedUser.mu_id ?? decodedUser.id ?? null
+    req.userRole = decodedUser.role ?? null
+    req.user = {
+      id: req.userId,
+      username: decodedUser.mu_username ?? decodedUser.username ?? null,
+      fullname: decodedUser.mu_fullname ?? decodedUser.fullname ?? null,
+      access: decodedUser.mu_access ?? decodedUser.access ?? null,
+      role: req.userRole,
+      status: decodedUser.mu_status ?? decodedUser.status ?? null,
     }
 
     return next()

@@ -1,4 +1,5 @@
 const { auth } = require('../middlewares/auth.middleware')
+const { authRouter } = require('../routes/auth.routes')
 const { masterAccessRouter } = require('../routes/master-access.routes')
 const { masterPositionRouter } = require('../routes/master-position.routes')
 const { masterDepartmentRouter } = require('../routes/master-department.routes')
@@ -18,7 +19,10 @@ const { redFlagRouter } = require('../routes/red-flag.routes')
 const { synchronizeRouter } = require('../routes/synchronize.routes')
 
 const initRoutes = (app) => {
-  //app.use(auth)
+  app.use('/auth', authRouter)
+
+  app.use(auth)
+
   app.use('/master-access', masterAccessRouter)
   app.use('/master-position', masterPositionRouter)
   app.use('/master-department', masterDepartmentRouter)

@@ -1,19 +1,9 @@
 const { Query, SQLQueryBuilder } = require('../database/utilities/queries.util')
 const { Master } = require('../database/models/Master')
 const { normalizeName, fetchAllHrmisData } = require('../services/hrmis.service.js')
+const { EncryptString } = require('../utilities/cryptography.util.js')
 
 const SQL = new SQLQueryBuilder()
-
-let EncrypterString
-try {
-  ;({ EncrypterString } = require('../repository/helper/crytography'))
-} catch {
-  console.warn(
-    'synchronize.controller: EncrypterString not found — passwords will be stored as-is ' +
-      'until this is wired to the real hashing utility.',
-  )
-  EncrypterString = (v) => v
-}
 
 // HRMIS's get-users payload carries no role/access info, but
 // master_user.mu_access_id is NOT NULL with no DB default. Change this
@@ -211,7 +201,7 @@ const syncUsers = async (hrmisUsers, hrmisIdToLocalId, defaultAccessId) => {
         [Master.User.cols.employee_id]: localEmployeeId,
         [Master.User.cols.access_id]: defaultAccessId,
         [Master.User.cols.username]: username,
-        [Master.User.cols.password]: EncrypterString(user_password),
+        [Master.User.cols.password]: EncryptString(user_password),
         [Master.User.cols.status]: 'ACTIVE',
       })
       .build()
