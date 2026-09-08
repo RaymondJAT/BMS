@@ -11,6 +11,28 @@ const formatDate = (dateString) => {
   })
 }
 
+// Color badges mapped by access role name
+const getRoleBadgeStyle = (roleName) => {
+  const normalized = (roleName || '').trim().toUpperCase()
+
+  switch (normalized) {
+    case 'REQUESTER':
+      return 'bg-blue-50 text-blue-700 border-blue-200'
+    case 'TEAM LEADER':
+      return 'bg-amber-50 text-amber-700 border-amber-200'
+    case 'FUND CUSTODIAN':
+      return 'bg-emerald-50 text-emerald-700 border-emerald-200'
+    case 'ADMINISTRATOR':
+      return 'bg-[#E31837]/10 text-[#E31837] border-[#E31837]/20'
+    case 'DEVELOPER':
+      return 'bg-indigo-50 text-indigo-700 border-indigo-200'
+    case 'FINANCE':
+      return 'bg-teal-50 text-teal-700 border-teal-200'
+    default:
+      return 'bg-slate-100 text-slate-800 border-slate-300'
+  }
+}
+
 export const createUserColumns = ({ rolesMap = {}, onSetAccess } = {}) => [
   {
     header: 'Full Name',
@@ -57,8 +79,12 @@ export const createUserColumns = ({ rolesMap = {}, onSetAccess } = {}) => [
         rolesMap[String(row?.access_id)] ||
         (row?.access_id != null ? `Role #${row.access_id}` : 'Unassigned')
 
+      const badgeStyle = getRoleBadgeStyle(roleName)
+
       return (
-        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-800 border border-slate-300 whitespace-nowrap">
+        <span
+          className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-extrabold border whitespace-nowrap ${badgeStyle}`}
+        >
           {roleName}
         </span>
       )
@@ -108,7 +134,7 @@ export const createUserColumns = ({ rolesMap = {}, onSetAccess } = {}) => [
       <button
         type="button"
         onClick={() => onSetAccess?.(row)}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-[11px] rounded-lg transition-all cursor-pointer"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-semibold text-[11px] rounded-lg transition-all cursor-pointer shadow-2xs"
       >
         <KeySquare className="w-3.5 h-3.5 text-slate-500" />
       </button>

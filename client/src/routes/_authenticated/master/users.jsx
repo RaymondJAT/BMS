@@ -41,12 +41,12 @@ export default function UsersPage() {
     setAccessTargetUser(row)
   }, [])
 
+  const handleCloseAccessModal = useCallback(() => {
+    setAccessTargetUser(null)
+  }, [])
+
   const handleSaveAccess = useCallback(
     async (userId, roleId) => {
-      // Adjust the method name/payload shape to whatever masterUserApi
-      // actually exposes — this assumes a single upsert(payload) that
-      // POSTs to /master-user, matching upsertMasterUser's id-based
-      // insert/update branching on the backend.
       await masterUserApi.upsert({ id: userId, access: roleId })
       await refetch()
     },
@@ -204,9 +204,10 @@ export default function UsersPage() {
       </div>
 
       <AccessAssignmentModal
+        isOpen={Boolean(accessTargetUser)}
         user={accessTargetUser}
         accessRoles={accessRoles}
-        onClose={() => setAccessTargetUser(null)}
+        onClose={handleCloseAccessModal}
         onSave={handleSaveAccess}
       />
     </div>

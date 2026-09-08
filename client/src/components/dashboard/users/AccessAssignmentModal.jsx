@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react'
-import { X, Loader2 } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { Loader2, AlertCircle } from 'lucide-react'
+import { Modal } from '../../ui/Modal'
 
 /**
  * accessRoles: raw role rows from useUserManagementLookups, shape
  * { id/ma_id, name/ma_name, status/ma_status }.
  */
-export default function AccessAssignmentModal({ user, accessRoles = [], onClose, onSave }) {
+export default function AccessAssignmentModal({ isOpen, user, accessRoles = [], onClose, onSave }) {
   const [selectedRoleId, setSelectedRoleId] = useState('')
   const [isSaving, setIsSaving] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
@@ -15,7 +16,7 @@ export default function AccessAssignmentModal({ user, accessRoles = [], onClose,
       setSelectedRoleId(user.access_id != null ? String(user.access_id) : '')
       setErrorMessage('')
     }
-  }, [user])
+  }, [user, isOpen])
 
   if (!user) return null
 
@@ -23,7 +24,8 @@ export default function AccessAssignmentModal({ user, accessRoles = [], onClose,
     (r) => String(r.status || r.ma_status || 'ACTIVE').toUpperCase() === 'ACTIVE',
   )
 
-  const handleSave = async () => {
+  const handleSave = async (e) => {
+    e.preventDefault()
     if (!selectedRoleId) {
       setErrorMessage('Please select a role.')
       return
@@ -41,63 +43,66 @@ export default function AccessAssignmentModal({ user, accessRoles = [], onClose,
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl border border-slate-200 p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-sm font-bold text-slate-900">Set Access Role</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 cursor-pointer">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <p className="text-xs text-slate-500 mb-3">
-          {user.fullname || user.username} — choose the role this user should have.
+    <Modal isOpen={isOpen} onClose={onClose} title="Set Access Role" maxWidth="max-w-sm">
+      <form onSubmit={handleSave} className="space-y-3.5 sm:space-y-4">
+        {/* USER CONTEXT SUBTITLE */}
+        <p className="text-xs text-slate-500 font-medium">
+          <span className="font-semibold text-slate-800">{user.fullname || user.username}</span> —
+          choose the role this user should have.
         </p>
 
+        {/* ERROR ALERT */}
         {errorMessage && (
-          <div className="mb-3 p-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg">
-            {errorMessage}
+          <div className="p-3 rounded-xl border flex items-center gap-2.5 bg-rose-50 border-rose-200 text-rose-800 text-xs font-medium">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{errorMessage}</span>
           </div>
         )}
 
-        <select
-          value={selectedRoleId}
-          onChange={(e) => setSelectedRoleId(e.target.value)}
-          disabled={isSaving}
-          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent mb-4"
-        >
-          <option value="">Select a role...</option>
-          {activeRoles.map((role) => {
-            const id = role.id ?? role.ma_id
-            const name = role.name ?? role.ma_name
-            return (
-              <option key={id} value={id}>
-                {name}
-              </option>
-            )
-          })}
-        </select>
+        {/* ROLE SELECT */}
+        <div>
+          <label className="block text-[11px] sm:text-xs font-semibold text-slate-700 mb-1 truncate">
+            System Access Role <span className="text-[#E31837]">*</span>
+          </label>
+          <select
+            value={selectedRoleId}
+            onChange={(e) => setSelectedRoleId(e.target.value)}
+            disabled={isSaving}
+            className="w-full px-2.5 sm:px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm font-semibold text-slate-800 focus:bg-white focus:ring-2 focus:ring-[#E31837] focus:outline-none cursor-pointer transition-all disabled:opacity-50"
+          >
+            <option value="">Select a role...</option>
+            {activeRoles.map((role) => {
+              const id = role.id ?? role.ma_id
+              const name = role.name ?? role.ma_name
+              return (
+                <option key={id} value={id}>
+                  {name}
+                </option>
+              )
+            })}
+          </select>
+        </div>
 
-        <div className="flex justify-end gap-2">
+        {/* ACTION CONTROLS */}
+        <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-3 border-t border-slate-100">
           <button
             type="button"
             onClick={onClose}
             disabled={isSaving}
-            className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 rounded-lg cursor-pointer"
+            className="w-full sm:w-auto px-4 py-2 border border-slate-200 text-slate-700 font-semibold text-xs rounded-lg hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50"
           >
             Cancel
           </button>
           <button
-            type="button"
-            onClick={handleSave}
+            type="submit"
             disabled={isSaving}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#E31837] hover:bg-[#c4122e] disabled:opacity-50 text-white text-xs font-bold rounded-lg cursor-pointer"
+            className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2 bg-[#E31837] hover:bg-[#c4122e] text-white font-bold text-xs rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            Save
+            Save Role
           </button>
         </div>
-      </div>
-    </div>
+      </form>
+    </Modal>
   )
 }
