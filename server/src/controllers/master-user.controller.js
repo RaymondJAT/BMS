@@ -4,16 +4,17 @@ const { Master } = require('../database/models/Master')
 const { EncryptString } = require('../utilities/cryptography.util')
 const SQL = new SQLQueryBuilder()
 
-/**
- * @name UpsertMasterUser
- * @description Update and insert User
- */
-const upsertMasterUser = async (req, res) => {
-  // #swagger.tags = ['Master User']
-  // #swagger.description = 'Upsert User'
-  // #swagger.autoBody = false
-  // #swagger.consumes = ['application/x-www-form-urlencoded']
+const accessRoleExists = async (accessId) => {
+  const rows = await Query(
+    `SELECT ${Master.Access.pk} AS id
+     FROM ${Master.Access.table}
+     WHERE ${Master.Access.pk} = ? AND ${Master.Access.cols.status} = 'ACTIVE'`,
+    [accessId],
+  )
+  return Boolean(rows?.[0]?.id)
+}
 
+const upsertMasterUser = async (req, res) => {
   const { id, employee_id, username, password, access, access_id, status } = req.body
   const roleAccess = access !== undefined ? access : access_id
   const currentUserId = req.user?.id || req.user?.user_id || null
@@ -21,14 +22,19 @@ const upsertMasterUser = async (req, res) => {
   let query
 
   try {
+    if (roleAccess !== undefined) {
+      const valid = await accessRoleExists(roleAccess)
+      if (!valid) {
+        return res.status(400).json({ message: 'Invalid or inactive access role' })
+      }
+    }
+
     if (id) {
       let updateData = {}
       if (employee_id !== undefined) updateData[Master.User.cols.employee_id] = employee_id
       if (username !== undefined) updateData[Master.User.cols.username] = username
       if (password !== undefined) updateData[Master.User.cols.password] = EncryptString(password)
-      if (roleAccess !== undefined && Master.User.cols.access) {
-        updateData[Master.User.cols.access] = roleAccess
-      }
+      if (roleAccess !== undefined) updateData[Master.User.cols.access_id] = roleAccess
       if (status !== undefined) updateData[Master.User.cols.status] = status
 
       if (Master.User.cols.updatedAt) updateData[Master.User.cols.updatedAt] = new Date()
@@ -41,9 +47,11 @@ const upsertMasterUser = async (req, res) => {
         query = SQL.model(Master.User).update(updateData).where(Master.User.pk, id).build()
       }
     } else {
-      // Basic validation for inserts
       if (!username || !password) {
         return res.status(400).json({ message: 'Missing required fields' })
+      }
+      if (roleAccess === undefined) {
+        return res.status(400).json({ message: 'access (role) is required' })
       }
 
       query = SQL.model(Master.User)
@@ -51,7 +59,7 @@ const upsertMasterUser = async (req, res) => {
           [Master.User.cols.employee_id]: employee_id,
           [Master.User.cols.username]: username,
           [Master.User.cols.password]: EncryptString(password),
-          ...(Master.User.cols.access ? { [Master.User.cols.access]: roleAccess } : {}),
+          [Master.User.cols.access_id]: roleAccess,
           [Master.User.cols.status]: status || 'ACTIVE',
           ...(Master.User.cols.createdBy && currentUserId
             ? { [Master.User.cols.createdBy]: currentUserId }
@@ -77,33 +85,27 @@ const upsertMasterUser = async (req, res) => {
   }
 }
 
-/**
- * @name getMasterUser
- * @description Get all User records
- */
 const getMasterUser = async (req, res) => {
-  // #swagger.tags = ['Master User']
-  // #swagger.description = 'Get all User records'
-
   try {
     const selectCols = [
       `${Master.User.table}.${Master.User.cols.id} AS id`,
       `${Master.User.table}.${Master.User.cols.id} AS user_id`,
       `${Master.User.table}.${Master.User.cols.username} AS username`,
       `${Master.User.table}.${Master.User.cols.status} AS status`,
+      `${Master.User.table}.${Master.User.cols.access_id} AS access_id`,
     ]
 
-    if (Master.Employee && Master.Employee.table && Master.Employee.cols.employee_id) {
+    if (Master.Employee?.table && Master.Employee.cols.employee_id) {
       selectCols.push(`${Master.Employee.table}.${Master.Employee.cols.employee_id} AS employee_id`)
     } else {
       selectCols.push(`${Master.User.table}.${Master.User.cols.employee_id} AS employee_id`)
     }
 
-    if (Master.User.cols.access) {
-      selectCols.push(`${Master.User.table}.${Master.User.cols.access} AS access_id`)
+    if (Master.Access?.table && Master.Access.cols.name) {
+      selectCols.push(`${Master.Access.table}.${Master.Access.cols.name} AS access_name`)
     }
 
-    if (Master.Employee && Master.Employee.table && Master.Employee.cols.fullname) {
+    if (Master.Employee?.table && Master.Employee.cols.fullname) {
       selectCols.push(`${Master.Employee.table}.${Master.Employee.cols.fullname} AS fullname`)
     }
 
@@ -113,7 +115,7 @@ const getMasterUser = async (req, res) => {
 
     let builder = SQL.model(Master.User).select(selectCols)
 
-    if (Master.Employee && Master.Employee.table) {
+    if (Master.Employee?.table) {
       builder = builder.leftJoin(
         Master.Employee.table,
         `${Master.User.table}.${Master.User.cols.employee_id}`,
@@ -121,8 +123,15 @@ const getMasterUser = async (req, res) => {
       )
     }
 
-    const { sql, bindings } = builder.build()
+    if (Master.Access?.table) {
+      builder = builder.leftJoin(
+        Master.Access.table,
+        `${Master.User.table}.${Master.User.cols.access_id}`,
+        `${Master.Access.table}.${Master.Access.pk}`,
+      )
+    }
 
+    const { sql, bindings } = builder.build()
     const result = await Query(sql, bindings)
 
     const usersData = Array.isArray(result)

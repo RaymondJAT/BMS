@@ -1,4 +1,4 @@
-import { Shield, Calendar, User } from 'lucide-react'
+import { Shield, Calendar, User, KeySquare } from 'lucide-react'
 
 const formatDate = (dateString) => {
   if (!dateString) return '—'
@@ -11,15 +11,7 @@ const formatDate = (dateString) => {
   })
 }
 
-/**
- * Field names match getMasterUser's confirmed response shape:
- * { id, user_id, username, password, status, employee_id, access_id,
- *   fullname, createdAt }
- * fullname is pre-joined by the backend. rolesMap (id/access_id -> name)
- * comes from useCashDisbursementLookups. password is intentionally
- * never rendered.
- */
-export const createUserColumns = ({ rolesMap = {} } = {}) => [
+export const createUserColumns = ({ rolesMap = {}, onSetAccess } = {}) => [
   {
     header: 'Full Name',
     accessorKey: 'fullname',
@@ -60,9 +52,10 @@ export const createUserColumns = ({ rolesMap = {} } = {}) => [
     width: 'w-2/12',
     cell: (row) => {
       const roleName =
+        row?.access_name ||
         rolesMap[row?.access_id] ||
         rolesMap[String(row?.access_id)] ||
-        (row?.access_id != null ? `Role #${row.access_id}` : 'Standard Access')
+        (row?.access_id != null ? `Role #${row.access_id}` : 'Unassigned')
 
       return (
         <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-800 border border-slate-300 whitespace-nowrap">
@@ -104,6 +97,21 @@ export const createUserColumns = ({ rolesMap = {} } = {}) => [
         <Calendar className="w-3.5 h-3.5 text-slate-500 shrink-0" />
         <span>{formatDate(row?.createdAt)}</span>
       </div>
+    ),
+  },
+  {
+    header: 'Actions',
+    accessorKey: 'actions',
+    align: 'center',
+    width: 'w-2/12',
+    cell: (row) => (
+      <button
+        type="button"
+        onClick={() => onSetAccess?.(row)}
+        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-[11px] rounded-lg transition-all cursor-pointer"
+      >
+        <KeySquare className="w-3.5 h-3.5 text-slate-500" />
+      </button>
     ),
   },
 ]

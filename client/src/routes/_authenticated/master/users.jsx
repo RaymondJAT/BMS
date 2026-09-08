@@ -13,7 +13,9 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { createUserColumns } from '../../../config/tables/userColumns'
-import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
+import { useUserManagementLookups } from '../../../hooks/useUserManagementLookups'
+import { masterUserApi } from '../../../api/masterUserApi'
+import AccessAssignmentModal from '../../../components/dashboard/users/AccessAssignmentModal'
 
 export const Route = createFileRoute('/_authenticated/master/users')({
   component: UsersPage,
@@ -24,18 +26,32 @@ export default function UsersPage() {
   const [statusFilter, setStatusFilter] = useState('ALL')
   const [selectedIds, setSelectedIds] = useState([])
 
-  const [selectedUser, setSelectedUser] = useState(null)
-  const [isEditOpen, setIsEditOpen] = useState(false)
+  const [accessTargetUser, setAccessTargetUser] = useState(null)
 
-  // fullname comes pre-joined on each user row (see
-  // master-user.controller.js getMasterUser) — rolesMap only resolves
-  // access_id -> a display label.
-  const { users = [], rolesMap = {}, isLoading, error } = useCashDisbursementLookups()
+  const {
+    users = [],
+    rolesMap = {},
+    accessRoles = [],
+    isLoading,
+    error,
+    refetch,
+  } = useUserManagementLookups()
 
-  const handleEdit = useCallback((row) => {
-    setSelectedUser(row)
-    setIsEditOpen(true)
+  const handleSetAccess = useCallback((row) => {
+    setAccessTargetUser(row)
   }, [])
+
+  const handleSaveAccess = useCallback(
+    async (userId, roleId) => {
+      // Adjust the method name/payload shape to whatever masterUserApi
+      // actually exposes — this assumes a single upsert(payload) that
+      // POSTs to /master-user, matching upsertMasterUser's id-based
+      // insert/update branching on the backend.
+      await masterUserApi.upsert({ id: userId, access: roleId })
+      await refetch()
+    },
+    [refetch],
+  )
 
   const handleSelectionChange = useCallback((keys) => {
     setSelectedIds(keys)
@@ -54,7 +70,7 @@ export default function UsersPage() {
       const fullname = (usr.fullname || '').toLowerCase()
       const username = (usr.username || '').toLowerCase()
       const empId = String(usr.employee_id ?? '')
-      const roleName = (rolesMap[usr.access_id] || '').toLowerCase()
+      const roleName = (usr.access_name || rolesMap[usr.access_id] || '').toLowerCase()
 
       const matchesSearch =
         fullname.includes(q) || username.includes(q) || empId.includes(q) || roleName.includes(q)
@@ -67,13 +83,12 @@ export default function UsersPage() {
   }, [users, searchTerm, statusFilter, rolesMap])
 
   const columns = useMemo(
-    () => createUserColumns({ onEdit: handleEdit, rolesMap }),
-    [handleEdit, rolesMap],
+    () => createUserColumns({ rolesMap, onSetAccess: handleSetAccess }),
+    [rolesMap, handleSetAccess],
   )
 
   return (
     <div className="w-full h-full flex-1 flex flex-col min-h-0 space-y-3 overflow-hidden">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 shrink-0">
         <div>
           <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight">
@@ -83,7 +98,6 @@ export default function UsersPage() {
             Manage user accounts, roles, access permissions, and activation statuses.
           </p>
         </div>
-
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
@@ -95,7 +109,6 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* Metrics Banner */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 shrink-0">
         <StatCard
           title="Total Users"
@@ -120,7 +133,6 @@ export default function UsersPage() {
         />
       </div>
 
-      {/* Toolbar & Filters */}
       <div className="flex flex-col sm:flex-row items-center justify-between gap-2.5 bg-white py-2 px-3 rounded-xl border border-slate-200/80 shrink-0">
         <div className="relative w-full sm:w-72">
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -132,7 +144,6 @@ export default function UsersPage() {
             className="w-full pl-8 pr-3 py-1 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
           />
         </div>
-
         <div className="flex items-center gap-2 self-end sm:self-auto">
           <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-600">
             <Filter className="w-3.5 h-3.5 text-slate-400" />
@@ -150,7 +161,6 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* Data Table */}
       <div className="flex-1 min-h-0 w-full overflow-hidden">
         {isLoading ? (
           <div className="h-full flex flex-col items-center justify-center bg-white rounded-xl border border-slate-200/80 p-6">
@@ -192,6 +202,13 @@ export default function UsersPage() {
           />
         )}
       </div>
+
+      <AccessAssignmentModal
+        user={accessTargetUser}
+        accessRoles={accessRoles}
+        onClose={() => setAccessTargetUser(null)}
+        onSave={handleSaveAccess}
+      />
     </div>
   )
 }
