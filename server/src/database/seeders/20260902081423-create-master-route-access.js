@@ -82,6 +82,14 @@ module.exports = {
       {
         mra_id: 10,
         mra_access_id: null,
+        mra_name: 'projects',
+        mra_permission: 'NO-ACCESS',
+        mra_status: 'ACTIVE',
+        mra_createdAt: new Date(),
+      },
+      {
+        mra_id: 11,
+        mra_access_id: null,
         mra_name: 'synchronize',
         mra_permission: 'NO-ACCESS',
         mra_status: 'ACTIVE',
@@ -90,7 +98,7 @@ module.exports = {
 
       // FUND MANAGEMENT
       {
-        mra_id: 11,
+        mra_id: 12,
         mra_access_id: null,
         mra_name: 'budget',
         mra_permission: 'NO-ACCESS',
@@ -98,7 +106,7 @@ module.exports = {
         mra_createdAt: new Date(),
       },
       {
-        mra_id: 12,
+        mra_id: 13,
         mra_access_id: null,
         mra_name: 'revolving',
         mra_permission: 'NO-ACCESS',
@@ -106,7 +114,7 @@ module.exports = {
         mra_createdAt: new Date(),
       },
       {
-        mra_id: 13,
+        mra_id: 14,
         mra_access_id: null,
         mra_name: 'disbursements',
         mra_permission: 'NO-ACCESS',
@@ -114,7 +122,7 @@ module.exports = {
         mra_createdAt: new Date(),
       },
       {
-        mra_id: 14,
+        mra_id: 15,
         mra_access_id: null,
         mra_name: 'audit-history',
         mra_permission: 'NO-ACCESS',
@@ -124,7 +132,7 @@ module.exports = {
 
       // FINANCE & CASH FLOW
       {
-        mra_id: 15,
+        mra_id: 16,
         mra_access_id: null,
         mra_name: 'pending',
         mra_permission: 'NO-ACCESS',
@@ -132,7 +140,7 @@ module.exports = {
         mra_createdAt: new Date(),
       },
       {
-        mra_id: 16,
+        mra_id: 17,
         mra_access_id: null,
         mra_name: 'completed',
         mra_permission: 'NO-ACCESS',
@@ -140,7 +148,7 @@ module.exports = {
         mra_createdAt: new Date(),
       },
       {
-        mra_id: 17,
+        mra_id: 18,
         mra_access_id: null,
         mra_name: 'rejected',
         mra_permission: 'NO-ACCESS',
@@ -148,7 +156,7 @@ module.exports = {
         mra_createdAt: new Date(),
       },
       {
-        mra_id: 18,
+        mra_id: 19,
         mra_access_id: null,
         mra_name: 'all-cash-requests',
         mra_permission: 'NO-ACCESS',
@@ -158,7 +166,7 @@ module.exports = {
 
       // MY WORKBENCH
       {
-        mra_id: 19,
+        mra_id: 20,
         mra_access_id: null,
         mra_name: 'requests',
         mra_permission: 'NO-ACCESS',
@@ -166,7 +174,7 @@ module.exports = {
         mra_createdAt: new Date(),
       },
       {
-        mra_id: 20,
+        mra_id: 21,
         mra_access_id: null,
         mra_name: 'liquidations',
         mra_permission: 'NO-ACCESS',
@@ -174,7 +182,7 @@ module.exports = {
         mra_createdAt: new Date(),
       },
       {
-        mra_id: 21,
+        mra_id: 22,
         mra_access_id: null,
         mra_name: 'approvals',
         mra_permission: 'NO-ACCESS',
@@ -184,7 +192,7 @@ module.exports = {
 
       // DISBURSEMENTS
       {
-        mra_id: 22,
+        mra_id: 23,
         mra_access_id: null,
         mra_name: 'processing',
         mra_permission: 'NO-ACCESS',
@@ -192,7 +200,7 @@ module.exports = {
         mra_createdAt: new Date(),
       },
       {
-        mra_id: 23,
+        mra_id: 24,
         mra_access_id: null,
         mra_name: 'verification',
         mra_permission: 'NO-ACCESS',
@@ -200,7 +208,7 @@ module.exports = {
         mra_createdAt: new Date(),
       },
       {
-        mra_id: 24,
+        mra_id: 25,
         mra_access_id: null,
         mra_name: 'disbursement-history',
         mra_permission: 'NO-ACCESS',
@@ -210,7 +218,7 @@ module.exports = {
 
       // REPORTS & LOGS
       {
-        mra_id: 25,
+        mra_id: 26,
         mra_access_id: null,
         mra_name: 'report-budget',
         mra_permission: 'NO-ACCESS',
@@ -218,7 +226,7 @@ module.exports = {
         mra_createdAt: new Date(),
       },
       {
-        mra_id: 26,
+        mra_id: 27,
         mra_access_id: null,
         mra_name: 'flag-analysis',
         mra_permission: 'NO-ACCESS',

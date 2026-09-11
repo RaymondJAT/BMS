@@ -67,6 +67,12 @@ export const NAVIGATION_ITEMS = [
         permissionKey: 'particulars',
       },
       {
+        id: 'master-projects',
+        title: 'Projects',
+        to: '/master/project',
+        permissionKey: 'project',
+      },
+      {
         id: 'master-synchronize',
         title: 'HRMIS Synchronize',
         to: '/master/synchronize',

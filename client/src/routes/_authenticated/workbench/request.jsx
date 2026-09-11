@@ -50,6 +50,8 @@ function CashRequestPage() {
     departments,
     employees,
     particulars,
+    activeProjects,
+    teamLeads,
     getDepartmentName,
     getEmployeeName,
     getFundLabel,
@@ -387,6 +389,8 @@ function CashRequestPage() {
           isSubmitting={isMutating}
           employees={employees}
           departments={departments}
+          projects={activeProjects}
+          teamLeads={teamLeads}
           editingRequest={editingRequest}
         />
       )}

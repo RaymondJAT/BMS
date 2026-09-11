@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Loader2, AlertCircle, Save } from 'lucide-react'
-import { Modal } from '../../../components/ui/Modal' // Adjust import path as needed
+import { Modal } from '../../../components/ui/Modal' 
 
 export default function EditParticularsModal({
   isOpen,

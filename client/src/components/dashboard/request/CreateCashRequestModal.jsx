@@ -37,6 +37,8 @@ export default function CreateCashRequestModal({
   isSubmitting,
   employees = [],
   departments = [],
+  projects = [],
+  teamLeads = [],
   editingRequest = null,
 }) {
   const isEditMode = Boolean(editingRequest)
@@ -166,14 +168,30 @@ export default function CreateCashRequestModal({
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
               Project <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
+            <select
               required
-              placeholder="Project Alpha"
               value={formData.project}
               onChange={(e) => setFormData({ ...formData, project: e.target.value })}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all placeholder:text-slate-400"
-            />
+              disabled={projects.length === 0}
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <option value="">
+                {projects.length === 0 ? 'No projects configured yet' : 'Select Project...'}
+              </option>
+              {projects.map((proj) => (
+                <option key={proj.id} value={proj.name}>
+                  {proj.name}
+                </option>
+              ))}
+              {/* Edit mode: if the request's saved project isn't in the current
+        master list (renamed/archived), keep it selectable so the form
+        doesn't silently blank out an existing value. */}
+              {isEditMode &&
+                formData.project &&
+                !projects.some((p) => p.name === formData.project) && (
+                  <option value={formData.project}>{formData.project} (archived)</option>
+                )}
+            </select>
           </div>
           <div>
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -265,14 +283,31 @@ export default function CreateCashRequestModal({
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
               Team Leader <span className="text-red-500">*</span>
             </label>
-            <input
-              type="text"
+            <select
               required
-              placeholder="Name of approving Team Leader"
               value={formData.team_lead}
               onChange={(e) => setFormData({ ...formData, team_lead: e.target.value })}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all placeholder:text-slate-400"
-            />
+              disabled={teamLeads.length === 0}
+              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <option value="">
+                {teamLeads.length === 0 ? 'No Team Leaders found' : 'Select Team Leader...'}
+              </option>
+              {teamLeads.map((tl) => (
+                <option key={tl.id} value={tl.fullname || tl.name || tl.full_name}>
+                  {tl.fullname || tl.name || tl.full_name || `Employee #${tl.id}`}
+                </option>
+              ))}
+              {isEditMode &&
+                formData.team_lead &&
+                !teamLeads.some(
+                  (tl) => (tl.fullname || tl.name || tl.full_name) === formData.team_lead,
+                ) && (
+                  <option value={formData.team_lead}>
+                    {formData.team_lead} (no longer a Team Leader)
+                  </option>
+                )}
+            </select>
           </div>
           <div className="sm:col-span-4">
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
