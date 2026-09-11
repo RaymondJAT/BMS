@@ -9,128 +9,194 @@ import {
 } from 'lucide-react'
 
 export const NAVIGATION_ITEMS = [
-  // DASHBOARD
   {
     id: 'dashboard',
     title: 'Dashboard',
     type: 'link',
     to: '/dashboard',
+    permissionKey: 'dashboard',
     icon: LayoutDashboard,
   },
-  // MASTER FILES
   {
     id: 'master-files',
     title: 'Master Files',
     type: 'dropdown',
     icon: Database,
     children: [
-      { id: 'master-access', title: 'User Access & Permissions', to: '/master/access' },
-      { id: 'master-users', title: 'Users', to: '/master/users' },
-      { id: 'master-route-access', title: 'Route Access', to: '/master/routeAccess' },
-      { id: 'master-departments', title: 'Departments', to: '/master/departments' },
-      // { id: 'master-positions', title: 'Positions', to: '/master/positions' },
-      { id: 'master-employees', title: 'Employees', to: '/master/employees' },
-      { id: 'master-districts', title: 'Districts & Stores', to: '/master/districts' },
-      { id: 'master-transport', title: 'Modes of Transportation', to: '/master/transportation' },
-      { id: 'master-particulars', title: 'Particulars & Expense Types', to: '/master/particulars' },
-      // Access: Admin (Pulls departments/positions/employees/user accounts from HRMIS)
-      { id: 'master-synchronize', title: 'HRMIS Synchronize', to: '/master/synchronize' },
+      {
+        id: 'master-access',
+        title: 'User Access & Permissions',
+        to: '/master/access',
+        permissionKey: 'access',
+      },
+      { id: 'master-users', title: 'Users', to: '/master/users', permissionKey: 'users' },
+      {
+        id: 'master-route-access',
+        title: 'Route Access',
+        to: '/master/routeAccess',
+        permissionKey: 'route-access',
+      },
+      {
+        id: 'master-departments',
+        title: 'Departments',
+        to: '/master/departments',
+        permissionKey: 'departments',
+      },
+      {
+        id: 'master-employees',
+        title: 'Employees',
+        to: '/master/employees',
+        permissionKey: 'employees',
+      },
+      {
+        id: 'master-districts',
+        title: 'Districts & Stores',
+        to: '/master/districts',
+        permissionKey: 'districts',
+      },
+      {
+        id: 'master-transport',
+        title: 'Modes of Transportation',
+        to: '/master/transportation',
+        permissionKey: 'transportation',
+      },
+      {
+        id: 'master-particulars',
+        title: 'Particulars & Expense Types',
+        to: '/master/particulars',
+        permissionKey: 'particulars',
+      },
+      {
+        id: 'master-synchronize',
+        title: 'HRMIS Synchronize',
+        to: '/master/synchronize',
+        permissionKey: 'synchronize',
+      },
     ],
   },
-  // FUND MANAGEMENT
   {
     id: 'fund-management',
     title: 'Fund Management',
     type: 'dropdown',
     icon: Building2,
     children: [
-      // Access: Finance, Admin (Allocating budgets per department/store)
-      { id: 'fund-allocations', title: 'Budget Allocations', to: '/funds/budget' },
-
-      // Access: Custodian, Finance, Admin (Managing active revolving funds/petty cash)
-      { id: 'fund-revolving', title: 'Revolving Funds', to: '/funds/revolving' },
-
-      // Access: Custodian, Finance, Admin
-      { id: 'fund-disbursements', title: 'Disbursement Register', to: '/funds/disbursements' },
-
-      // Access: Finance, Admin
-      { id: 'fund-history', title: 'Audit History', to: '/funds/audit-history' },
+      {
+        id: 'fund-allocations',
+        title: 'Budget Allocations',
+        to: '/funds/budget',
+        permissionKey: 'budget',
+      },
+      {
+        id: 'fund-revolving',
+        title: 'Revolving Funds',
+        to: '/funds/revolving',
+        permissionKey: 'revolving',
+      },
+      {
+        id: 'fund-disbursements',
+        title: 'Disbursement Register',
+        to: '/funds/disbursements',
+        permissionKey: 'disbursements',
+      },
+      {
+        id: 'fund-history',
+        title: 'Audit History',
+        to: '/funds/audit-history',
+        permissionKey: 'audit-history',
+      },
     ],
   },
-  // FINANCE & CASH FLOW
-  // {
-  //   id: 'finance',
-  //   title: 'Finance & Cash Flow',
-  //   type: 'dropdown',
-  //   icon: FileCheck2,
-  //   children: [
-  //     // Access: Finance, Admin (Final financial sign-off before/after custodian)
-  //     { id: 'fin-pending', title: 'Pending Final Approvals', to: '/finance/pending' },
-
-  //     // Access: Finance, Admin (Final validated liquidations)
-  //     { id: 'fin-completed', title: 'Completed Liquidations', to: '/finance/completed' },
-
-  //     // Access: Finance, Admin
-  //     { id: 'fin-rejected', title: 'Rejected Liquidations', to: '/finance/rejected' },
-
-  //     // Access: Finance, Admin (Master transaction list)
-  //     { id: 'fin-all', title: 'All Cash Requests', to: '/finance/all-cash-requests' },
-  //   ],
-  // },
-  // MY WORKBENCH
   {
     id: 'my-workbench',
     title: 'My Workbench',
     type: 'dropdown',
     icon: Wallet,
     children: [
-      // Access: Requester, Team Leader, Custodian, Finance, Admin
-      { id: 'wb-cash-requests', title: 'Cash Requests', to: '/workbench/request' },
-
-      // Access: Requester, Team Leader, Custodian, Finance, Admin
-      { id: 'wb-liquidations', title: 'Liquidations', to: '/workbench/liquidation' },
-
-      // Access: Team Leader, Admin (First-level review/approval for direct reports)
-      { id: 'wb-approvals', title: 'Approvals & Reviews', to: '/workbench/approvals' },
+      {
+        id: 'wb-cash-requests',
+        title: 'Cash Requests',
+        to: '/workbench/request',
+        permissionKey: 'requests',
+      },
+      {
+        id: 'wb-liquidations',
+        title: 'Liquidations',
+        to: '/workbench/liquidation',
+        permissionKey: 'liquidations',
+      },
+      {
+        id: 'wb-approvals',
+        title: 'Approvals & Reviews',
+        to: '/workbench/approvals',
+        permissionKey: 'approvals',
+      },
     ],
   },
-  // DISBURSEMENTS
-  // {
-  //   id: 'disbursements',
-  //   title: 'Disbursements',
-  //   type: 'dropdown',
-  //   icon: Banknote,
-  //   children: [
-  //     // Access: Custodian, Admin (Releasing cash for approved requests)
-  //     { id: 'disb-processing', title: 'For Processing', to: '/disbursements/processing' },
-
-  //     // Access: Custodian, Admin (Checking/verifying physical receipts)
-  //     {
-  //       id: 'disb-verification',
-  //       title: 'Liquidation Verification',
-  //       to: '/disbursements/verification',
-  //     },
-
-  //     // Access: Custodian, Finance, Admin (Audit log of released funds)
-  //     {
-  //       id: 'disb-history',
-  //       title: 'Disbursement History',
-  //       to: '/disbursements/disbursement-history',
-  //     },
-  //   ],
-  // },
-  // REPORTS & LOGS
   {
     id: 'reports',
     title: 'Reports & Logs',
     type: 'dropdown',
     icon: BarChart3,
     children: [
-      // Access: Team Leader, Finance, Admin
-      { id: 'report-budget', title: 'Budget Reports', to: '/reports/report-budget' },
-
-      // Access: Finance, Admin
-      { id: 'report-flag-analysis', title: 'Flag Analysis', to: '/reports/flag-analysis' },
+      {
+        id: 'report-budget',
+        title: 'Budget Reports',
+        to: '/reports/report-budget',
+        permissionKey: 'report-budget',
+      },
+      {
+        id: 'report-flag-analysis',
+        title: 'Flag Analysis',
+        to: '/reports/flag-analysis',
+        permissionKey: 'flag-analysis',
+      },
     ],
   },
 ]
+
+/**
+ * Flat pathname -> permissionKey lookup, derived once from
+ * NAVIGATION_ITEMS. Colocated here (rather than rebuilt in
+ * _authenticated.jsx) so the sidebar and the router guard can never
+ * drift apart on how a path maps to a permission key — there's only
+ * one place that mapping is defined.
+ */
+const PATH_TO_PERMISSION_KEY = NAVIGATION_ITEMS.reduce((map, item) => {
+  if (item.type === 'link') {
+    map[item.to] = item.permissionKey
+  } else if (item.type === 'dropdown') {
+    ;(item.children || []).forEach((child) => {
+      map[child.to] = child.permissionKey
+    })
+  }
+  return map
+}, {})
+
+/**
+ * Resolves the permissionKey a given router pathname maps to, or
+ * undefined if the path isn't in NAVIGATION_ITEMS at all (e.g. a
+ * dynamic sub-route not yet listed).
+ */
+export function getPermissionKeyForPath(pathname) {
+  return PATH_TO_PERMISSION_KEY[pathname]
+}
+
+/**
+ * Returns the `to` path of the first NAVIGATION_ITEMS entry (in
+ * declared order) that canAccessRoute allows, or null if none are
+ * accessible. Used as the redirect target when a denied route needs
+ * somewhere to send the user — hardcoding /dashboard breaks for any
+ * role that wasn't explicitly granted dashboard access.
+ */
+export function getFirstAccessiblePath(canAccessRoute) {
+  for (const item of NAVIGATION_ITEMS) {
+    if (item.type === 'link' && canAccessRoute(item.permissionKey)) {
+      return item.to
+    }
+    if (item.type === 'dropdown') {
+      const child = (item.children || []).find((c) => canAccessRoute(c.permissionKey))
+      if (child) return child.to
+    }
+  }
+  return null
+}

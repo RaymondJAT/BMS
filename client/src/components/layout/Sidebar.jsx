@@ -1,18 +1,42 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from '@tanstack/react-router'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
 import { ChevronDown, Layers, X } from 'lucide-react'
 import { NAVIGATION_ITEMS } from '../../config/navigation.config'
 import { sidebarVariants, labelVariants, dropdownVariants } from './layout.variants'
+import { useAuth } from '../../context/AuthContext'
 
 export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
   const shouldReduceMotion = useReducedMotion()
+  const { canAccessRoute } = useAuth()
+
+  // Single source of truth: same canAccessRoute the router guard in
+  // _authenticated.jsx uses. A route hidden here is also blocked there,
+  // and vice versa — see that file's comment.
+  const visibleNavItems = useMemo(() => {
+    return NAVIGATION_ITEMS.reduce((acc, item) => {
+      if (item.type === 'link') {
+        if (canAccessRoute(item.permissionKey)) acc.push(item)
+        return acc
+      }
+      if (item.type === 'dropdown') {
+        const visibleChildren = (item.children || []).filter((child) =>
+          canAccessRoute(child.permissionKey),
+        )
+        if (visibleChildren.length > 0) {
+          acc.push({ ...item, children: visibleChildren })
+        }
+        return acc
+      }
+      return acc
+    }, [])
+  }, [canAccessRoute])
 
   // Initialize all dropdowns closed by default
   const [openMenus, setOpenMenus] = useState(() => {
     const initialState = {}
-    NAVIGATION_ITEMS.forEach((item) => {
+    visibleNavItems.forEach((item) => {
       if (item.type === 'dropdown') {
         initialState[item.id] = false
       }
@@ -20,9 +44,6 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
     return initialState
   })
 
-  // Collapsed-sidebar flyout: { id, title, top, left, children } | null.
-  // Rendered through a portal so it escapes the sidebar's overflow-hidden
-  // (needed for the width-collapse animation) instead of being clipped.
   const [flyout, setFlyout] = useState(null)
   const closeTimeoutRef = useRef(null)
 
@@ -54,8 +75,6 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
   const handleFlyoutCloseScheduled = useCallback(() => {
     if (!isCollapsed) return
     clearCloseTimeout()
-    // Small delay so the cursor can travel from the icon to the flyout
-    // panel itself without it disappearing mid-move.
     closeTimeoutRef.current = setTimeout(() => setFlyout(null), 150)
   }, [isCollapsed])
 
@@ -66,7 +85,6 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
     }))
   }
 
-  // Trigger close callback on mobile navigation clicks
   const handleLinkClick = () => {
     if (isMobile && onCloseMobile) {
       onCloseMobile()
@@ -84,7 +102,6 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
 
   return (
     <>
-      {/* Mobile / Tablet Backdrop Overlay */}
       <AnimatePresence>
         {isMobile && isOpen && (
           <motion.div
@@ -99,7 +116,6 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
         )}
       </AnimatePresence>
 
-      {/* Main Sidebar Shell */}
       <motion.aside
         initial={false}
         animate={currentVariant}
@@ -112,7 +128,6 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
         `}
         aria-label="Main Navigation"
       >
-        {/* Unified Sidebar Header */}
         <div className="flex h-16 items-center justify-between px-4 border-b border-slate-200/80 shrink-0">
           <Link
             to="/dashboard"
@@ -138,7 +153,6 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
             </motion.div>
           </Link>
 
-          {/* Close button explicitly for mobile header */}
           {isMobile && (
             <button
               onClick={onCloseMobile}
@@ -150,12 +164,10 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
           )}
         </div>
 
-        {/* Navigation Items */}
         <nav className="custom-scrollbar flex-1 space-y-1.5 p-3 overflow-y-auto overflow-x-hidden">
-          {NAVIGATION_ITEMS.map((item) => {
+          {visibleNavItems.map((item) => {
             const Icon = item.icon
 
-            // Single link item
             if (item.type === 'link') {
               return (
                 <div key={item.id}>
@@ -189,7 +201,6 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
               )
             }
 
-            // Dropdown group item
             if (item.type === 'dropdown') {
               const isDropdownOpen = !!openMenus[item.id]
 
@@ -201,11 +212,6 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
                 >
                   <button
                     onClick={(e) => {
-                      // While collapsed, children never render inline (see
-                      // the AnimatePresence guard below) — clicking opens
-                      // the flyout directly instead of silently doing
-                      // nothing, so keyboard/touch users (no hover) can
-                      // still reach the sub-items.
                       if (isCollapsed) {
                         handleFlyoutOpen(item, e)
                         return
@@ -245,7 +251,6 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
                     )}
                   </button>
 
-                  {/* Inline sub-items list — expanded/mobile only */}
                   <AnimatePresence initial={false}>
                     {(isOpen || isMobile) && isDropdownOpen && (
                       <motion.div
@@ -282,9 +287,6 @@ export default function Sidebar({ isOpen, onCloseMobile, isMobile = false }) {
         </nav>
       </motion.aside>
 
-      {/* Collapsed-sidebar flyout — portaled to <body> so it isn't clipped
-          by the sidebar's overflow-hidden. Only ever mounted when
-          collapsed on desktop. */}
       {isCollapsed &&
         flyout &&
         createPortal(

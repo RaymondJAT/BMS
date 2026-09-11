@@ -1,6 +1,7 @@
-import { createFileRoute, Navigate, Outlet } from '@tanstack/react-router'
+import { createFileRoute, Navigate, Outlet, useLocation } from '@tanstack/react-router'
 import { useAuth } from '../context/AuthContext'
-import UnifiedLayout from '../components/layout/UnifiedLayout' 
+import UnifiedLayout from '../components/layout/UnifiedLayout'
+import { getPermissionKeyForPath, getFirstAccessiblePath } from '../config/navigation.config'
 
 export const Route = createFileRoute('/_authenticated')({
   validateSearch: (search) => ({
@@ -10,22 +11,64 @@ export const Route = createFileRoute('/_authenticated')({
   component: AuthenticatedLayout,
 })
 
-function AuthenticatedLayout() {
-  const { isAuthenticated, isLoading } = useAuth()
+function useRouteAccessGuard(pathname) {
+  const { isAuthenticated, isLoading, permissionsLoaded, canAccessRoute } = useAuth()
 
-  if (isLoading) {
+  if (isLoading) return { status: 'authenticating' }
+  if (!isAuthenticated) return { status: 'unauthenticated' }
+  if (!permissionsLoaded) return { status: 'loading-permissions' }
+
+  const permissionKey = getPermissionKeyForPath(pathname)
+  if (!permissionKey || !canAccessRoute(permissionKey)) {
+    return { status: 'denied', canAccessRoute }
+  }
+
+  return { status: 'allowed' }
+}
+
+function AuthenticatedLayout() {
+  const location = useLocation()
+  const guard = useRouteAccessGuard(location.pathname)
+
+  if (guard.status === 'authenticating' || guard.status === 'loading-permissions') {
     return (
       <div className="flex items-center justify-center min-h-screen bg-slate-50">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-3 border-[#E31837] border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm font-medium text-slate-500">Verifying access...</p>
+          <p className="text-sm font-medium text-slate-500">
+            {guard.status === 'authenticating' ? 'Verifying access...' : 'Loading permissions...'}
+          </p>
         </div>
       </div>
     )
   }
 
-  if (!isAuthenticated) {
+  if (guard.status === 'unauthenticated') {
     return <Navigate to="/login" replace search={{ redirect: window.location.pathname }} />
+  }
+
+  if (guard.status === 'denied') {
+    const fallbackPath = getFirstAccessiblePath(guard.canAccessRoute)
+
+    // No accessible fallback exists (role genuinely has nothing granted)
+    // — nowhere sensible to redirect to, so show the restricted message.
+    // Also guards against redirecting to a fallback that IS the current
+    // denied path, which would otherwise loop.
+    if (!fallbackPath || fallbackPath === location.pathname) {
+      return (
+        <div className="flex items-center justify-center min-h-screen bg-slate-50 p-6 text-center">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900 mb-2">Access Restricted</h1>
+            <p className="text-slate-500 max-w-sm">
+              Your account doesn't have access to any configured routes yet. Contact an
+              administrator to have your role's permissions set up.
+            </p>
+          </div>
+        </div>
+      )
+    }
+
+    return <Navigate to={fallbackPath} replace />
   }
 
   return (

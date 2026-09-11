@@ -33,15 +33,15 @@
 
     <script>
       async function handleLogin() {
-        const userName = prompt('Enter Username:')
+        const username = prompt('Enter username:')
         const password = prompt('Enter Password:')
 
-        if (userName && password) {
+        if (username && password) {
           try {
             const response = await fetch('/auth/login', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ userName, password }), 
+              body: JSON.stringify({ username, password }), 
             })
 
             if (response.ok) {

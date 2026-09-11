@@ -7,7 +7,6 @@ export default function Navbar({ onToggleMobile }) {
 
   return (
     <header className="relative flex h-16 items-center justify-between border-b border-slate-200/80 bg-white px-4 sm:px-6 shadow-xs shrink-0 z-20">
-      {/* menu trigger for mobile device */}
       <div className="flex items-center gap-3">
         <button
           type="button"
@@ -19,11 +18,12 @@ export default function Navbar({ onToggleMobile }) {
         </button>
       </div>
 
-      {/* User Info & Logout */}
       <div className="flex items-center gap-3 sm:gap-4">
         <div className="text-right hidden sm:block">
-          <p className="text-sm font-bold text-slate-800 leading-tight">{user?.name || 'User'}</p>
-          <p className="text-xs text-slate-400 font-medium">{user?.role || 'DEVELOPER'}</p>
+          <p className="text-sm font-bold text-slate-800 leading-tight">
+            {user?.fullname || user?.username || 'User'}
+          </p>
+          <p className="text-xs text-slate-400 font-medium">{user?.access_name || '—'}</p>
         </div>
         <button
           type="button"
