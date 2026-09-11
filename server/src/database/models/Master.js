@@ -107,6 +107,14 @@
  * @property {'mpt_createdAt'} createdAt
  */
 
+/**
+ * @typedef {Object} ProjectCols
+ * @property {'mpjt_id'} id
+ * @property {'mpjt_name'} name
+ * @property {'mpjt_status'} status
+ * @property {'mpjt_createdAt'} createdAt
+ */
+
 const Master = {
   Access: {
     table: 'master_access',
@@ -278,6 +286,20 @@ const Master = {
     },
     select: ['mpt_id', 'mpt_code', 'mpt_name', 'mpt_type', 'mpt_description', 'mpt_status', 'mpt_createdAt'],
     insert: ['mpt_code', 'mpt_name', 'mpt_type', 'mpt_description', 'mpt_status'],
+  },
+  Project: {
+    table: 'master_project',
+    pk: 'mpjt_id',
+    prefix: 'mpjt',
+    /** @type {ProjectCols} */
+    cols: {
+      id: 'mpjt_id',
+      name: 'mpjt_name',
+      status: 'mpjt_status',
+      createdAt: 'mpjt_createdAt',
+    },
+    select: ['mpjt_id', 'mpjt_name', 'mpjt_status', 'mpjt_createdAt'],
+    insert: ['mpjt_name', 'mpjt_status'],
   },
 };
 
