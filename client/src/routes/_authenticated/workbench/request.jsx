@@ -20,6 +20,7 @@ import ViewCashRequestModal from '../../../components/dashboard/request/ViewCash
 import ApproveCashRequestModal from '../../../components/dashboard/request/ApproveCashRequestModal'
 import DisburseCashRequestModal from '../../../components/dashboard/request/DisburseCashRequestModal'
 import useCashRequests from '../../../hooks/useCashRequests'
+import { useAuth } from '../../../context/AuthContext'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
 import CreateLiquidationModal from '../../../components/dashboard/liquidation/CreateLiquidationModal'
 import ViewLiquidationModal from '../../../components/dashboard/liquidation/ViewLiquidationModal'
@@ -37,9 +38,21 @@ const formatCurrency = (val) =>
     minimumFractionDigits: 2,
   }).format(val || 0)
 
+// Roles allowed to create/edit a Cash Request. Only Administrator sees
+// the multi-status filter dropdown too — Team Leader/Fund Custodian/
+// Finance are already server-scoped to one status by useCashRequests, so
+// a status dropdown there would just offer choices that always return
+// empty (see useCashRequests.js's roleParams).
+const CREATE_ROLES = ['ADMINISTRATOR', 'REQUESTER']
+const STATUS_FILTER_ROLES = ['ADMINISTRATOR', 'REQUESTER', 'DEVELOPER']
+
 function CashRequestPage() {
-  const userRole = 'ADMINISTRATOR'
-  const currentEmployeeId = null
+  const { user: currentUser } = useAuth()
+  const userRole = currentUser?.access_name || null
+  const currentEmployeeId = currentUser?.employee_id || currentUser?.id || null
+
+  const canCreate = CREATE_ROLES.includes(userRole)
+  const showStatusFilter = STATUS_FILTER_ROLES.includes(userRole)
 
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('ALL')
@@ -69,7 +82,7 @@ function CashRequestPage() {
     approveRequest,
     rejectRequest,
     disburseRequest,
-  } = useCashRequests({ role: userRole })
+  } = useCashRequests({ role: userRole, employeeId: currentEmployeeId })
 
   const { districts, modes } = useLiquidationMasterData()
 
@@ -82,27 +95,23 @@ function CashRequestPage() {
       .catch(() => {})
   }, [currentEmployeeId, requests])
 
+  // ── Modal state ──────────────────────────────────────────────────
+  // One object instead of 4 separate booleans/values — "what's open and
+  // for which row" is a single source of truth. `modal.type` is one of:
+  // 'create' | 'edit' | 'view' | 'approve' | 'disburse' | null.
+  const [modal, setModal] = useState({ type: null, request: null })
+  const openModal = useCallback((type, request = null) => setModal({ type, request }), [])
+  const closeModal = useCallback(() => setModal({ type: null, request: null }), [])
+
+  // Liquidation has its own two-step flow (create vs. view-existing), so
+  // it keeps separate state from the main modal above, but each is still
+  // a single consolidated object rather than 3 loose useStates.
   const [liquidateTarget, setLiquidateTarget] = useState(null)
-  const [isLiquidateOpen, setIsLiquidateOpen] = useState(false)
   const [isLiquidating, setIsLiquidating] = useState(false)
-  const [viewLiquidationRow, setViewLiquidationRow] = useState(null)
-  const [viewLiquidationDetail, setViewLiquidationDetail] = useState(null)
-  const [viewLiquidationActivity, setViewLiquidationActivity] = useState(null)
+  const [liquidationView, setLiquidationView] = useState(null) // { detail, activity } | null
 
-  const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const [editingRequest, setEditingRequest] = useState(null)
-  const [selectedRequest, setSelectedRequest] = useState(null)
-  const [activeModal, setActiveModal] = useState(null)
-
-  const handleLiquidate = useCallback((row) => {
-    setLiquidateTarget(row)
-    setIsLiquidateOpen(true)
-  }, [])
-
-  const handleCloseLiquidate = useCallback(() => {
-    setIsLiquidateOpen(false)
-    setLiquidateTarget(null)
-  }, [])
+  const handleLiquidate = useCallback((row) => setLiquidateTarget(row), [])
+  const handleCloseLiquidate = useCallback(() => setLiquidateTarget(null), [])
 
   const handleCreateLiquidation = useCallback(
     async (payload) => {
@@ -124,67 +133,28 @@ function CashRequestPage() {
   )
 
   const handleViewLiquidation = useCallback(async (row) => {
-    setViewLiquidationRow(row)
-    const detail = await liquidationApi.getById(row.liquidation_id)
-    const acts = await liquidationApi.getActivity({ liquidation_id: row.liquidation_id })
-    setViewLiquidationDetail(detail)
-    setViewLiquidationActivity(acts)
+    const [detail, activity] = await Promise.all([
+      liquidationApi.getById(row.liquidation_id),
+      liquidationApi.getActivity({ liquidation_id: row.liquidation_id }),
+    ])
+    setLiquidationView({ detail, activity: activity || [] })
   }, [])
 
-  const handleCloseViewLiquidation = useCallback(() => {
-    setViewLiquidationRow(null)
-    setViewLiquidationDetail(null)
-    setViewLiquidationActivity(null)
-  }, [])
+  const handleCloseViewLiquidation = useCallback(() => setLiquidationView(null), [])
 
-  const handleView = useCallback((row) => {
-    setSelectedRequest(row)
-    setActiveModal('view')
-  }, [])
-
-  const handleEdit = useCallback((row) => {
-    setEditingRequest(row)
-    setIsCreateOpen(true)
-  }, [])
-
-  const handleApproveAction = useCallback((row) => {
-    setSelectedRequest(row)
-    setActiveModal('approve')
-  }, [])
-
-  const handleDisburseAction = useCallback((row) => {
-    setSelectedRequest(row)
-    setActiveModal('disburse')
-  }, [])
-
-  const handleCloseModal = useCallback(() => {
-    setActiveModal(null)
-    setSelectedRequest(null)
-  }, [])
-
-  const handleCloseCreateModal = useCallback(() => {
-    setIsCreateOpen(false)
-    setEditingRequest(null)
-  }, [])
-
-  const handleSelectionChange = useCallback((keys) => {
-    setSelectedIds(keys)
-  }, [])
+  const handleSelectionChange = useCallback((keys) => setSelectedIds(keys), [])
 
   const filteredRequests = useMemo(() => {
+    const q = searchTerm.toLowerCase()
     return requests.filter((req) => {
-      const q = searchTerm.toLowerCase()
       const requesterName = getEmployeeName(req.employee_id).toLowerCase()
-
       const matchesSearch =
         (req.reference_id || '').toLowerCase().includes(q) ||
         (req.project || '').toLowerCase().includes(q) ||
         (req.purpose || '').toLowerCase().includes(q) ||
         requesterName.includes(q)
-
       const matchesStatus =
         statusFilter === 'ALL' || String(req.status || '').toUpperCase() === statusFilter
-
       return matchesSearch && matchesStatus
     })
   }, [requests, searchTerm, statusFilter, getEmployeeName])
@@ -194,10 +164,10 @@ function CashRequestPage() {
       createRequestColumns({
         userRole,
         currentEmployeeId,
-        onView: handleView,
-        onEdit: handleEdit,
-        onApprove: handleApproveAction,
-        onComplete: handleDisburseAction,
+        onView: (row) => openModal('view', row),
+        onEdit: (row) => openModal('edit', row),
+        onApprove: (row) => openModal('approve', row),
+        onComplete: (row) => openModal('disburse', row),
         onLiquidate: handleLiquidate,
         onViewLiquidation: handleViewLiquidation,
         getEmployeeName,
@@ -207,10 +177,7 @@ function CashRequestPage() {
     [
       userRole,
       currentEmployeeId,
-      handleView,
-      handleEdit,
-      handleApproveAction,
-      handleDisburseAction,
+      openModal,
       handleLiquidate,
       handleViewLiquidation,
       getEmployeeName,
@@ -218,6 +185,37 @@ function CashRequestPage() {
       getFundLabel,
     ],
   )
+
+  const metricCards = [
+    {
+      title: 'Total Requested',
+      value: formatCurrency(metrics?.totalRequested),
+      icon: FileText,
+      subtitle: 'Excludes rejected',
+      variant: 'blue',
+    },
+    {
+      title: 'Pending Team Leader',
+      value: metrics?.pendingCount || 0,
+      icon: Clock,
+      subtitle: 'Awaiting first approval',
+      variant: 'amber',
+    },
+    {
+      title: 'Pending Fund Custodian',
+      value: formatCurrency(metrics?.approvedAmount),
+      icon: CheckCircle2,
+      subtitle: 'Team Leader approved',
+      variant: 'emerald',
+    },
+    {
+      title: 'Completed',
+      value: formatCurrency(metrics?.completedAmount),
+      icon: Banknote,
+      subtitle: 'Disbursed to date',
+      variant: 'blue',
+    },
+  ]
 
   return (
     <div className="w-full h-full flex-1 flex flex-col min-h-0 space-y-3 overflow-hidden">
@@ -247,52 +245,26 @@ function CashRequestPage() {
               <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
               Export
             </button>
-            <button
-              type="button"
-              disabled={!eligibility.eligible}
-              onClick={() => {
-                setEditingRequest(null)
-                setIsCreateOpen(true)
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#E31837] hover:bg-[#c4122e] text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              New Cash Request
-            </button>
+            {canCreate && (
+              <button
+                type="button"
+                disabled={!eligibility.eligible}
+                onClick={() => openModal('create')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#E31837] hover:bg-[#c4122e] text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                New Cash Request
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       {/* Metrics Banner */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 shrink-0">
-        <StatCard
-          title="Total Requested"
-          value={formatCurrency(metrics?.totalRequested)}
-          icon={FileText}
-          subtitle="Excludes rejected"
-          variant="blue"
-        />
-        <StatCard
-          title="Pending Team Leader"
-          value={metrics?.pendingCount || 0}
-          icon={Clock}
-          subtitle="Awaiting first approval"
-          variant="amber"
-        />
-        <StatCard
-          title="Pending Fund Custodian"
-          value={formatCurrency(metrics?.approvedAmount)}
-          icon={CheckCircle2}
-          subtitle="Team Leader approved"
-          variant="emerald"
-        />
-        <StatCard
-          title="Completed"
-          value={formatCurrency(metrics?.completedAmount)}
-          icon={Banknote}
-          subtitle="Disbursed to date"
-          variant="blue"
-        />
+        {metricCards.map((card) => (
+          <StatCard key={card.title} {...card} />
+        ))}
       </div>
 
       {/* Toolbar & Filters */}
@@ -308,23 +280,25 @@ function CashRequestPage() {
           />
         </div>
 
-        <div className="flex items-center gap-2 self-end sm:self-auto">
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-600">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <span>Status:</span>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer text-xs"
-            >
-              <option value="ALL">All Statuses</option>
-              <option value="PENDING">Pending Team Leader</option>
-              <option value="APPROVED">Pending Fund Custodian</option>
-              <option value="COMPLETED">Completed</option>
-              <option value="REJECTED">Rejected</option>
-            </select>
+        {showStatusFilter && (
+          <div className="flex items-center gap-2 self-end sm:self-auto">
+            <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-600">
+              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              <span>Status:</span>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer text-xs"
+              >
+                <option value="ALL">All Statuses</option>
+                <option value="PENDING">Pending Team Leader</option>
+                <option value="APPROVED">Pending Fund Custodian</option>
+                <option value="COMPLETED">Completed</option>
+                <option value="REJECTED">Rejected</option>
+              </select>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Data Table */}
@@ -380,62 +354,63 @@ function CashRequestPage() {
       </div>
 
       {/* Modals */}
-      {isCreateOpen && (
+      {(modal.type === 'create' || modal.type === 'edit') && (
         <CreateCashRequestModal
-          isOpen={isCreateOpen}
-          onClose={handleCloseCreateModal}
+          isOpen
+          onClose={closeModal}
           onCreate={createRequest}
           onUpdate={(payload) => editRequest(payload.id, payload)}
           isSubmitting={isMutating}
+          currentUser={currentUser}
           employees={employees}
           departments={departments}
           projects={activeProjects}
           teamLeads={teamLeads}
-          editingRequest={editingRequest}
+          editingRequest={modal.type === 'edit' ? modal.request : null}
         />
       )}
 
-      {activeModal === 'view' && selectedRequest && (
+      {modal.type === 'view' && (
         <ViewCashRequestModal
           isOpen
-          onClose={handleCloseModal}
-          request={selectedRequest}
+          onClose={closeModal}
+          request={modal.request}
           getEmployeeName={getEmployeeName}
           getDepartmentName={getDepartmentName}
           getFundLabel={getFundLabel}
         />
       )}
 
-      {activeModal === 'approve' && selectedRequest && (
+      {modal.type === 'approve' && (
         <ApproveCashRequestModal
           isOpen
-          onClose={handleCloseModal}
-          request={selectedRequest}
-          onApprove={(payload) => approveRequest(selectedRequest.id, payload)}
-          onReject={(payload) => rejectRequest(selectedRequest.id, payload)}
+          onClose={closeModal}
+          request={modal.request}
+          onApprove={(payload) => approveRequest(modal.request.id, payload)}
+          onReject={(payload) => rejectRequest(modal.request.id, payload)}
           isSubmitting={isMutating}
           getDepartmentName={getDepartmentName}
           getEmployeeName={getEmployeeName}
         />
       )}
 
-      {activeModal === 'disburse' && selectedRequest && (
+      {modal.type === 'disburse' && (
         <DisburseCashRequestModal
           isOpen
-          onClose={handleCloseModal}
-          cashRequest={selectedRequest}
+          onClose={closeModal}
+          cashRequest={modal.request}
           revolvingFunds={revolvingFunds}
-          onDisburse={(payload) => disburseRequest(selectedRequest.id, payload)}
-          onReject={(payload) => rejectRequest(selectedRequest.id, payload)}
+          onDisburse={(payload) => disburseRequest(modal.request.id, payload)}
+          onReject={(payload) => rejectRequest(modal.request.id, payload)}
           isSubmitting={isMutating}
           getFundLabel={getFundLabel}
           getEmployeeName={getEmployeeName}
         />
       )}
 
-      {isLiquidateOpen && liquidateTarget && (
+      {liquidateTarget && (
         <CreateLiquidationModal
-          isOpen={isLiquidateOpen}
+          isOpen
           onClose={handleCloseLiquidate}
           onCreate={handleCreateLiquidation}
           isSubmitting={isLiquidating}
@@ -447,12 +422,12 @@ function CashRequestPage() {
         />
       )}
 
-      {viewLiquidationRow && viewLiquidationDetail && (
+      {liquidationView && (
         <ViewLiquidationModal
           isOpen
           onClose={handleCloseViewLiquidation}
-          liquidation={viewLiquidationDetail}
-          activity={viewLiquidationActivity || []}
+          liquidation={liquidationView.detail}
+          activity={liquidationView.activity}
           getEmployeeName={getEmployeeName}
         />
       )}

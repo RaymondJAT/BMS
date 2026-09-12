@@ -1,4 +1,3 @@
-const { v4: uuidv4 } = require('uuid')
 const { Query, Transaction, SQLQueryBuilder } = require('../database/utilities/queries.util')
 const { Master } = require('../database/models/Master')
 const { EncryptString } = require('../utilities/cryptography.util')
@@ -85,6 +84,28 @@ const upsertMasterUser = async (req, res) => {
   }
 }
 
+/**
+ * @name getMasterUser
+ * @description Get all Master User records, joined with Employee and
+ *              Access for display purposes.
+ *
+ *              IMPORTANT: `employee_id` here is unconditionally
+ *              master_user.mu_employee_id — the actual foreign key
+ *              pointing at master_employee.me_id. This is the value
+ *              every downstream consumer needs (Cash Request's
+ *              cr_employee_id, Cash Disbursement, the logged-in user's
+ *              session payload used to auto-populate the Requester field
+ *              on the Cash Request form, etc.).
+ *
+ *              Previously this column was conditionally overwritten with
+ *              master_employee.me_employee_id (the human-readable HR
+ *              code, e.g. "EMP-1024") under the SAME "employee_id"
+ *              alias whenever the Employee join was available — which
+ *              silently broke every FK lookup that expected an me_id
+ *              integer. That HR code is now returned separately as
+ *              `employee_code` so it's still available if a display
+ *              label ever needs it, without shadowing the FK.
+ */
 const getMasterUser = async (req, res) => {
   try {
     const selectCols = [
@@ -93,12 +114,17 @@ const getMasterUser = async (req, res) => {
       `${Master.User.table}.${Master.User.cols.username} AS username`,
       `${Master.User.table}.${Master.User.cols.status} AS status`,
       `${Master.User.table}.${Master.User.cols.access_id} AS access_id`,
+      // The FK to master_employee.me_id — what every other controller
+      // (Cash Request, Cash Disbursement, etc.) actually expects.
+      `${Master.User.table}.${Master.User.cols.employee_id} AS employee_id`,
     ]
 
+    // Human-readable HR code — kept under a distinct alias so it never
+    // collides with the FK above.
     if (Master.Employee?.table && Master.Employee.cols.employee_id) {
-      selectCols.push(`${Master.Employee.table}.${Master.Employee.cols.employee_id} AS employee_id`)
-    } else {
-      selectCols.push(`${Master.User.table}.${Master.User.cols.employee_id} AS employee_id`)
+      selectCols.push(
+        `${Master.Employee.table}.${Master.Employee.cols.employee_id} AS employee_code`,
+      )
     }
 
     if (Master.Access?.table && Master.Access.cols.name) {
@@ -107,6 +133,16 @@ const getMasterUser = async (req, res) => {
 
     if (Master.Employee?.table && Master.Employee.cols.fullname) {
       selectCols.push(`${Master.Employee.table}.${Master.Employee.cols.fullname} AS fullname`)
+    }
+
+    if (Master.Employee?.table && Master.Employee.cols.department_id) {
+      selectCols.push(
+        `${Master.Employee.table}.${Master.Employee.cols.department_id} AS department_id`,
+      )
+    }
+
+    if (Master.Employee?.table && Master.Employee.cols.position_id) {
+      selectCols.push(`${Master.Employee.table}.${Master.Employee.cols.position_id} AS position_id`)
     }
 
     if (Master.User.cols.createdAt) {

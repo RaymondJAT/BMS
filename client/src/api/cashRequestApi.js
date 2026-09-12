@@ -62,7 +62,8 @@ export const cashRequestApi = {
   // the only action that creates a Cash Disbursement and moves the
   // target Revolving Fund's balance/status — see completeCashRequest.
   // Requires `revolving_fund_id` (selected by the Fund Custodian in this
-  // same step, not at creation) and `particulars`.
+  // same step, not at creation). `remarks` is optional. Purpose is
+  // copied server-side from the original request — never send it here.
   complete: async (payload) => {
     const response = await apiClient.put('/cash-request/complete', payload)
     return response.data

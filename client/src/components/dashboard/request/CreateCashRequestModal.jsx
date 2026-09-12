@@ -2,6 +2,8 @@ import { useState, useEffect, useMemo } from 'react'
 import { Modal } from '../../ui/Modal'
 import { amountToWords } from '../../../utils/numberToWords'
 
+const getTodayDate = () => new Date().toISOString().slice(0, 10)
+
 const EMPTY_FORM = {
   project: '',
   purpose: '',
@@ -10,24 +12,13 @@ const EMPTY_FORM = {
   department_id: '',
   position_name: '',
   team_lead: '',
-  request_date: new Date().toISOString().slice(0, 10),
+  request_date: getTodayDate(),
 }
 
 /**
  * Requester creates a Cash Request -> PENDING, or edits/resubmits an
  * existing PENDING/REJECTED one (backend resets it to PENDING on save —
  * see updateCashRequest). No financial effect either way.
- *
- * IMPORTANT: the Requester does NOT select a Revolving Fund here — that
- * field is assigned later by the Fund Custodian at completion time (see
- * DisburseCashRequestModal), matching the corrected workflow. Nor is
- * `particulars`/`cash_voucher` collected here, for the same reason as
- * before (finalized at completion).
- *
- * Position, Request Date, and Amount in Words are restored from Cash
- * Request Form V1: Position is read-only/derived from the selected
- * Requester (existing employee data), and Amount in Words is derived
- * live from Amount — neither is ever typed by the user.
  */
 export default function CreateCashRequestModal({
   isOpen,
@@ -35,6 +26,7 @@ export default function CreateCashRequestModal({
   onCreate,
   onUpdate,
   isSubmitting,
+  currentUser = null, // Logged in user/employee context
   employees = [],
   departments = [],
   projects = [],
@@ -65,29 +57,37 @@ export default function CreateCashRequestModal({
         department_id: editingRequest.department_id ?? '',
         position_name: employee?.position_name || employee?.position || '',
         team_lead: editingRequest.team_lead || '',
-        request_date: editingRequest.request_date
-          ? new Date(editingRequest.request_date).toISOString().slice(0, 10)
-          : new Date().toISOString().slice(0, 10),
+        request_date: getTodayDate(), // Always reset to today's date
+      })
+    } else {
+      // Auto-populate logged-in user details on create
+      const loggedInEmployee = employees.find(
+        (emp) => String(emp.id) === String(currentUser?.employee_id || currentUser?.id),
+      )
+
+      const employeeId = loggedInEmployee?.id || currentUser?.employee_id || currentUser?.id || ''
+      const departmentId = loggedInEmployee?.department_id || currentUser?.department_id || ''
+      const positionName =
+        loggedInEmployee?.position_name ||
+        loggedInEmployee?.position ||
+        currentUser?.position_name ||
+        currentUser?.position ||
+        ''
+
+      setFormData({
+        ...EMPTY_FORM,
+        employee_id: employeeId,
+        department_id: departmentId,
+        position_name: positionName,
+        request_date: getTodayDate(),
       })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, editingRequest])
+  }, [isOpen, editingRequest, currentUser, employees])
 
   const handleAmountKeyDown = (e) => {
     if (['e', 'E', '+', '-'].includes(e.key)) {
       e.preventDefault()
     }
-  }
-
-  const handleEmployeeChange = (e) => {
-    const employeeId = e.target.value
-    const employee = employees.find((emp) => String(emp.id) === String(employeeId))
-    setFormData((prev) => ({
-      ...prev,
-      employee_id: employeeId,
-      department_id: employee?.department_id ?? prev.department_id,
-      position_name: employee?.position_name || employee?.position || '',
-    }))
   }
 
   const amountInWords = useMemo(
@@ -183,9 +183,6 @@ export default function CreateCashRequestModal({
                   {proj.name}
                 </option>
               ))}
-              {/* Edit mode: if the request's saved project isn't in the current
-        master list (renamed/archived), keep it selectable so the form
-        doesn't silently blank out an existing value. */}
               {isEditMode &&
                 formData.project &&
                 !projects.some((p) => p.name === formData.project) && (
@@ -195,7 +192,7 @@ export default function CreateCashRequestModal({
           </div>
           <div>
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Particulars / Purpose <span className="text-red-500">*</span>
+              Purpose <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
@@ -208,17 +205,16 @@ export default function CreateCashRequestModal({
           </div>
         </div>
 
-        {/* REQUESTER & DEPARTMENT */}
+        {/* REQUESTER & DEPARTMENT (Read-only/Disabled for Logged-In User) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
           <div>
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Requester <span className="text-red-500">*</span>
+              Requester
             </label>
             <select
-              required
+              disabled
               value={formData.employee_id}
-              onChange={handleEmployeeChange}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all cursor-pointer"
+              className="w-full px-2.5 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 cursor-not-allowed appearance-none"
             >
               <option value="">Select Employee...</option>
               {employees.map((emp) => (
@@ -230,13 +226,12 @@ export default function CreateCashRequestModal({
           </div>
           <div>
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Department <span className="text-red-500">*</span>
+              Department
             </label>
             <select
-              required
+              disabled
               value={formData.department_id}
-              onChange={(e) => setFormData({ ...formData, department_id: e.target.value })}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all cursor-pointer"
+              className="w-full px-2.5 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 cursor-not-allowed appearance-none"
             >
               <option value="">Select Department...</option>
               {departments.map((dept) => (
@@ -248,7 +243,7 @@ export default function CreateCashRequestModal({
           </div>
         </div>
 
-        {/* POSITION (read-only, derived) & REQUEST DATE */}
+        {/* POSITION & REQUEST DATE (Disabled / Non-clickable) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-3">
           <div>
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -265,14 +260,14 @@ export default function CreateCashRequestModal({
           </div>
           <div>
             <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Request Date <span className="text-red-500">*</span>
+              Request Date
             </label>
             <input
               type="date"
-              required
+              readOnly
+              tabIndex={-1}
               value={formData.request_date}
-              onChange={(e) => setFormData({ ...formData, request_date: e.target.value })}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#E31837] focus:border-transparent transition-all"
+              className="w-full px-2.5 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 cursor-not-allowed select-none focus:outline-none pointer-events-none"
             />
           </div>
         </div>
@@ -332,7 +327,7 @@ export default function CreateCashRequestModal({
           </div>
         </div>
 
-        {/* AMOUNT IN WORDS — auto-derived, never typed */}
+        {/* AMOUNT IN WORDS — auto-derived */}
         <div>
           <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
             Amount in Words

@@ -323,7 +323,7 @@ const approveCashRequest = async (req, res) => {
     return res.status(400).json({ message: 'Missing required field: id' })
   }
 
-  if (!requireRole(req, res, ['TEAM_LEAD', 'ADMIN'])) return
+  if (!requireRole(req, res, ['TEAM LEADER', 'ADMINISTRATOR'])) return
 
   try {
     const cr = await getCashRequestById(id)
@@ -394,7 +394,7 @@ const rejectCashRequest = async (req, res) => {
       .json({ message: 'Missing required field: remarks (reason for rejection)' })
   }
 
-  if (!requireRole(req, res, ['TEAM_LEAD', 'FUND_CUSTODIAN', 'ADMIN'])) return
+  if (!requireRole(req, res, ['TEAM LEADER', 'FUND CUSTODIAN', 'ADMINISTRATOR'])) return
 
   try {
     const cr = await getCashRequestById(id)
@@ -596,7 +596,7 @@ const completeCashRequest = async (req, res) => {
     })
   }
 
-  if (!requireRole(req, res, ['FUND_CUSTODIAN', 'ADMIN'])) return
+  if (!requireRole(req, res, ['FUND CUSTODIAN', 'ADMINISTRATOR'])) return
 
   try {
     const cr = await getCashRequestById(id)

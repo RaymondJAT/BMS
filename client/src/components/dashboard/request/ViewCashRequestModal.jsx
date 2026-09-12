@@ -16,8 +16,10 @@ const STATUS_STYLES = {
 }
 
 /**
- * Read-only — cash-request.routes.js has no update endpoint, so there's
- * nothing editable here by design, only a details view.
+ * Read-only detail view. Editing a Cash Request happens through
+ * CreateCashRequestModal in edit mode (see handleEdit in
+ * CashRequestPage.jsx) — this modal never mutates anything, it's purely
+ * for inspecting a request's current state.
  */
 export default function ViewCashRequestModal({
   isOpen,

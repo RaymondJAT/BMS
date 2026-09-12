@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { cashRequestApi } from '../api/cashRequestApi'
 
@@ -10,6 +10,22 @@ import { cashRequestApi } from '../api/cashRequestApi'
  * shared runMutation() helper returning { success, message } so modals
  * can decide whether to close themselves.
  *
+ * ROLE-BASED SCOPING (server-side, via getCashRequest's status/
+ * employee_id query params — see cash-request.controller.js):
+ *   - REQUESTER:      only their own requests (employee_id filter),
+ *                      every status.
+ *   - TEAM LEADER:    only PENDING requests (their approval queue).
+ *   - FUND CUSTODIAN: only APPROVED requests (their approval queue).
+ *   - FINANCE:        only COMPLETED requests (view-only reporting).
+ *   - ADMINISTRATOR / DEVELOPER: no filter — everything.
+ *   - any other/unresolved role: status filtered to a value that never
+ *     matches, so an unrecognized or still-loading role sees nothing
+ *     rather than everything (fail-closed, mirrors requestColumns.js).
+ *
+ * These are genuine server-side query params, not just client-side
+ * button hiding — a Team Leader's list literally never contains
+ * APPROVED/COMPLETED/REJECTED rows from the backend.
+ *
  * IMPORTANT: only completing a request (disburseRequest, below) actually
  * moves money. It creates a new cash_disbursement row and moves the
  * Fund-Custodian-selected revolving_fund's balance/status server-side —
@@ -20,28 +36,61 @@ import { cashRequestApi } from '../api/cashRequestApi'
  * disburseRequest only — create/edit/approve/reject never move money, so
  * they never invalidate them.
  */
-export function useCashRequests({ role, ...initialParams } = {}) {
+export function useCashRequests({ role, employeeId, ...restParams } = {}) {
   const [requests, setRequests] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
   const [isMutating, setIsMutating] = useState(false)
   const queryClient = useQueryClient()
 
-  const fetchCashRequests = useCallback(async (params = initialParams) => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const data = await cashRequestApi.getAll(params)
-      setRequests(data || [])
-    } catch (err) {
-      console.error('Failed to fetch cash requests:', err)
-      setError(err.response?.data?.message || 'Failed to load cash requests.')
-    } finally {
-      setIsLoading(false)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // restParams isn't expected to change across this hook's lifetime (the
+  // page never passes anything beyond role/employeeId today) — captured
+  // via ref so it can't cause fetchCashRequests to be recreated every
+  // render just because the caller passed a fresh {} literal.
+  const restParamsRef = useRef(restParams)
+  restParamsRef.current = restParams
 
+  const roleParams = useMemo(() => {
+    switch (role) {
+      case 'REQUESTER':
+        return employeeId != null ? { employee_id: employeeId } : {}
+      case 'TEAM LEADER':
+        return { status: 'PENDING' }
+      case 'FUND CUSTODIAN':
+        return { status: 'APPROVED' }
+      case 'FINANCE':
+        return { status: 'COMPLETED' }
+      case 'ADMINISTRATOR':
+      case 'DEVELOPER':
+        return {}
+      default:
+        // Unresolved/loading role, or a role with no defined scope —
+        // fail closed: filter to a status that can never match so
+        // nothing leaks before the real role is known.
+        return { status: '__NONE__' }
+    }
+  }, [role, employeeId])
+
+  const fetchCashRequests = useCallback(
+    async (paramsOverride) => {
+      setIsLoading(true)
+      setError(null)
+      try {
+        const params = paramsOverride ?? { ...roleParams, ...restParamsRef.current }
+        const data = await cashRequestApi.getAll(params)
+        setRequests(data || [])
+      } catch (err) {
+        console.error('Failed to fetch cash requests:', err)
+        setError(err.response?.data?.message || 'Failed to load cash requests.')
+      } finally {
+        setIsLoading(false)
+      }
+    },
+    [roleParams],
+  )
+
+  // Refetches whenever role or employeeId resolve/change — e.g. when
+  // currentUser loads asynchronously after the initial render.
   useEffect(() => {
     fetchCashRequests()
   }, [fetchCashRequests])
@@ -111,13 +160,11 @@ export function useCashRequests({ role, ...initialParams } = {}) {
     [runMutation],
   )
 
-  // role is accepted but not yet used to filter server-side — the backend
-  // getCashRequest only supports `status`/`employee_id` query params.
-  // Role only drives which action buttons render client-side (see
-  // requestColumns.js).
-  void role
-
-  // Derived metrics for the StatCard banner. Deliberately does NOT
+  // Derived metrics for the StatCard banner. Computed over whatever the
+  // current role's scoped `requests` list contains — e.g. a Team Leader
+  // will only ever see PENDING rows here, so approvedAmount/
+  // completedAmount will read 0 for them, which is expected: those
+  // figures belong to other roles' queues. Deliberately does NOT
   // include "Disbursed"/"Unliquidated" totals — those are Cash
   // Disbursement figures (see the Disbursements page).
   const metrics = useMemo(() => {

@@ -42,16 +42,31 @@ const EDITABLE_STATUSES = ['PENDING', 'REJECTED']
  * cv_number, purpose, project, amount, revolving_fund_id, employee_id,
  * department_id, team_lead, request_date, status, createdAt.
  *
- * Edit is now supported (PUT /cash-request/update) — visible only to the
- * Requester who owns the row, and only while it's PENDING (still with
- * the Team Leader) or REJECTED (returned for correction). Once the Team
- * Leader approves (status flips to APPROVED) or the Fund Custodian
- * completes it (COMPLETED), Edit disappears — see §6 of the workflow
- * spec.
+ * Role model (matches master_access.ma_name / AuthContext's
+ * user.access_name exactly):
+ *   - REQUESTER:      can create/edit their own PENDING or REJECTED
+ *                      requests. No approval actions.
+ *   - TEAM_LEAD:      first-stage approval — approve/reject a PENDING
+ *                      request (see ApproveCashRequestModal). Does not
+ *                      select a Revolving Fund.
+ *   - FUND_CUSTODIAN: final-stage approval — completes an APPROVED
+ *                      request by selecting the Revolving Fund to
+ *                      disburse from (see DisburseCashRequestModal).
+ *   - FINANCE:        view-only. No edit, no approve, no complete, no
+ *                      liquidate.
+ *   - ADMINISTRATOR:  full access to every action, matching
+ *                      AuthContext.jsx's PROTECTED_ACCESS_NAMES /
+ *                      canAccessRoute short-circuit.
  *
- * Actions are gated by userRole + ownership client-side only, for now —
- * the backend's requireRole() in cash-request.controller.js and the
- * status guard in updateCashRequest are the real enforcement points.
+ * IMPORTANT: an unresolved/loading role (userRole undefined/null) must
+ * NEVER be treated as full access — that was the previous behavior via
+ * `!userRole` and is a real permission leak. While the role hasn't
+ * loaded yet, every gated action stays hidden; only Administrator (an
+ * explicit, exact match) unlocks everything.
+ *
+ * These client-side checks are a UX convenience only — the backend's
+ * requireRole() in cash-request.controller.js and the status guards in
+ * updateCashRequest/completeCashRequest are the real enforcement points.
  */
 export function createRequestColumns({
   userRole,
@@ -66,16 +81,13 @@ export function createRequestColumns({
   getDepartmentName,
   getFundLabel,
 }) {
-  // DEV MODE: no role wired up yet, or explicitly Administrator, means
-  // "can see and do everything" — this is intentional while access
-  // control isn't built out, so every action is visible/testable without
-  // needing real auth first. Once real roles land, remove this fallback
-  // and rely purely on the specific role checks below.
-  const hasFullAccess = !userRole || userRole === 'ADMINISTRATOR'
+  const isAdministrator = userRole === 'ADMINISTRATOR'
 
-  const canApprove = hasFullAccess || ['TEAM_LEAD', 'ADMIN'].includes(userRole)
-  const canComplete = hasFullAccess || ['FUND_CUSTODIAN', 'ADMIN'].includes(userRole)
-  const canActAsRequester = hasFullAccess || userRole === 'REQUESTER'
+  const canApprove = isAdministrator || userRole === 'TEAM LEADER'
+  const canComplete = isAdministrator || userRole === 'FUND CUSTODIAN'
+  const canActAsRequester = isAdministrator || userRole === 'REQUESTER'
+  // FINANCE (and any other/unresolved role) falls through to view-only —
+  // no explicit flag needed since every action below is gated positively.
 
   const resolveEmployee = (row) => {
     if (typeof getEmployeeName === 'function') {
@@ -213,7 +225,7 @@ export function createRequestColumns({
       cell: (row) => {
         const status = String(row.status || '').toUpperCase()
         const ownsRequest =
-          hasFullAccess ||
+          isAdministrator ||
           (canActAsRequester && String(row.employee_id) === String(currentEmployeeId))
         const canEdit = ownsRequest && EDITABLE_STATUSES.includes(status)
         // Liquidate only once COMPLETED and no liquidation exists yet for
