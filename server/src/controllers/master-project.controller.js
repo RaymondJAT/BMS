@@ -2,6 +2,9 @@ const { Query, SQLQueryBuilder } = require('../database/utilities/queries.util')
 const { Master } = require('../database/models/Master')
 const SQL = new SQLQueryBuilder()
 
+// Allowed status enum values
+const ALLOWED_STATUSES = ['ACTIVE', 'INACTIVE']
+
 /**
  * @name upsertMasterProject
  * @description Create or update a Project. Administrator-managed list —
@@ -23,13 +26,24 @@ const upsertMasterProject = async (req, res) => {
   /*
     #swagger.parameters['id'] = { in: 'formData', type: 'string', required: false, description: 'Project id — include to update, omit to create' }
     #swagger.parameters['name'] = { in: 'formData', type: 'string', required: true, description: 'Project name' }
-    #swagger.parameters['status'] = { in: 'formData', type: 'string', required: false, description: 'ACTIVE or INACTIVE — defaults to ACTIVE on create' }
+    #swagger.parameters['status'] = { in: 'formData', type: 'string', required: false, enum: ['ACTIVE', 'INACTIVE'], description: 'ACTIVE or INACTIVE — defaults to ACTIVE on create' }
   */
 
   // TEMP: matches the `req.userId || req.user?.id || 1` fallback used
   // across the other controllers until real auth is wired up.
   const userId = req.userId || req.user?.id || 1
   const { id, name, status } = req.body
+
+  // Validate status enum if provided
+  let formattedStatus
+  if (status !== undefined && status !== null) {
+    formattedStatus = String(status).trim().toUpperCase()
+    if (!ALLOWED_STATUSES.includes(formattedStatus)) {
+      return res.status(400).json({
+        message: `Invalid status value. Must be one of: ${ALLOWED_STATUSES.join(', ')}`,
+      })
+    }
+  }
 
   let query
 
@@ -43,7 +57,9 @@ const upsertMasterProject = async (req, res) => {
         }
         updateData[Master.Project.cols.name] = trimmedName
       }
-      if (status !== undefined) updateData[Master.Project.cols.status] = status
+      if (formattedStatus !== undefined) {
+        updateData[Master.Project.cols.status] = formattedStatus
+      }
 
       if (Master.Project.cols.updatedAt) updateData[Master.Project.cols.updatedAt] = new Date()
       if (Master.Project.cols.updatedBy) updateData[Master.Project.cols.updatedBy] = userId
@@ -63,7 +79,7 @@ const upsertMasterProject = async (req, res) => {
           [Master.Project.cols.name]: String(name).trim(),
           // Defaults to ACTIVE so a newly-created project is immediately
           // selectable on the Cash Request form without a second step.
-          [Master.Project.cols.status]: status || 'ACTIVE',
+          [Master.Project.cols.status]: formattedStatus || 'ACTIVE',
           ...(Master.Project.cols.createdBy ? { [Master.Project.cols.createdBy]: userId } : {}),
           ...(Master.Project.cols.createdAt ? { [Master.Project.cols.createdAt]: new Date() } : {}),
         })
@@ -98,7 +114,7 @@ const getMasterProject = async (req, res) => {
   // #swagger.tags = ['Project']
   // #swagger.description = 'Get all Project records, optionally filtered by status.'
   /*
-    #swagger.parameters['status'] = { in: 'query', type: 'string', required: false, description: 'Filter by status, e.g. ACTIVE' }
+    #swagger.parameters['status'] = { in: 'query', type: 'string', required: false, enum: ['ACTIVE', 'INACTIVE'], description: 'Filter by status: ACTIVE or INACTIVE' }
   */
 
   const { status } = req.query
@@ -112,7 +128,13 @@ const getMasterProject = async (req, res) => {
     ])
 
     if (status) {
-      builder = builder.where(Master.Project.cols.status, status)
+      const formattedStatus = String(status).trim().toUpperCase()
+      if (!ALLOWED_STATUSES.includes(formattedStatus)) {
+        return res.status(400).json({
+          message: `Invalid status filter. Must be one of: ${ALLOWED_STATUSES.join(', ')}`,
+        })
+      }
+      builder = builder.where(Master.Project.cols.status, formattedStatus)
     }
 
     const { sql, bindings } = builder.build()

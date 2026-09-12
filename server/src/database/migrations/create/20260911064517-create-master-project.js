@@ -15,7 +15,7 @@ module.exports = {
         allowNull: false,
       },
       mpjt_status: {
-        type: Sequelize.STRING,
+        type: Sequelize.ENUM('ACTIVE', 'INACTIVE'),
         allowNull: false,
       },
       mpjt_createdAt: {
