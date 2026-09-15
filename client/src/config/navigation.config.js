@@ -187,6 +187,14 @@ export function getPermissionKeyForPath(pathname) {
   return PATH_TO_PERMISSION_KEY[pathname]
 }
 
+// Sub-routes that aren't sidebar entries but still need a permission key
+// for the route guard — piggyback on their parent feature's permission.
+const EXTRA_PATH_TO_PERMISSION_KEY = {
+  '/workbench/liquidationDetail': 'liquidations',
+}
+
+Object.assign(PATH_TO_PERMISSION_KEY, EXTRA_PATH_TO_PERMISSION_KEY)
+
 /**
  * Returns the `to` path of the first NAVIGATION_ITEMS entry (in
  * declared order) that canAccessRoute allows, or null if none are

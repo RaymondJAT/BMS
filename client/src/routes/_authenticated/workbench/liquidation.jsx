@@ -1,15 +1,15 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState, useMemo, useCallback, useEffect } from 'react'
 import DataTable from '../../../components/ui/DataTable'
 import { Loader2 } from 'lucide-react'
 import { createLiquidationColumns } from '../../../config/tables/liquidationColumns'
 import CreateLiquidationModal from '../../../components/dashboard/liquidation/CreateLiquidationModal'
-import ViewLiquidationModal from '../../../components/dashboard/liquidation/ViewLiquidationModal'
 import ApproveLiquidationModal from '../../../components/dashboard/liquidation/ApproveLiquidationModal'
 import VerifyLiquidationModal from '../../../components/dashboard/liquidation/VerifyLiquidationModal'
 import FinanceReviewModal from '../../../components/dashboard/liquidation/FinanceReviewModal'
 import useLiquidations from '../../../hooks/useLiquidations'
 import useLiquidationMasterData from '../../../hooks/useLiquidationMasterData'
+import { useAuth } from '../../../context/AuthContext'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
 import { useCashDisbursements } from '../../../hooks/useCashDisbursements'
 import useRevolvingFunds from '../../../hooks/useRevolvingFunds'
@@ -20,8 +20,10 @@ export const Route = createFileRoute('/_authenticated/workbench/liquidation')({
 })
 
 function LiquidationPage() {
-  const userRole = 'ADMINISTRATOR'
-  const currentEmployeeId = null
+  const navigate = useNavigate()
+  const { user: currentUser } = useAuth()
+  const userRole = currentUser?.access_name || null
+  const currentEmployeeId = currentUser?.employee_id || null
 
   const {
     liquidations,
@@ -35,7 +37,7 @@ function LiquidationPage() {
     completeLiquidation,
     markIncomplete,
   } = useLiquidations({ role: userRole })
-  const { districts, modes, getModeName } = useLiquidationMasterData()
+  const { districts, modes } = useLiquidationMasterData()
   const { particulars, getEmployeeName, getFundLabel } = useCashDisbursementLookups()
 
   // Needed only for the Verify modal's fund picker: the disbursement tied
@@ -44,48 +46,47 @@ function LiquidationPage() {
   const { disbursements = [] } = useCashDisbursements()
   const { funds = [] } = useRevolvingFunds()
 
-  const [activeModal, setActiveModal] = useState(null)
-  const [selected, setSelected] = useState(null)
+  // ── Modal state ──────────────────────────────────────────────────
+  // One object instead of 4 separate useStates ('view' used to be one
+  // of these too — it's now a navigation instead, see handleView).
+  // modal.type is one of: 'edit' | 'approve' | 'verify' | 'finance' | null.
+  const [modal, setModal] = useState({ type: null, row: null })
   const [detail, setDetail] = useState(null)
   const [activity, setActivity] = useState([])
 
-  const loadDetail = useCallback(async (row) => {
-    const full = await liquidationApi.getById(row.id)
-    setDetail(full)
-    const acts = await liquidationApi.getActivity({ liquidation_id: row.id })
-    setActivity(acts)
-  }, [])
-
-  useEffect(() => {
-    if (selected) loadDetail(selected)
-  }, [selected, loadDetail])
-
-  const handleView = useCallback((row) => {
-    setSelected(row)
-    setActiveModal('view')
-  }, [])
-  const handleEdit = useCallback((row) => {
-    setSelected(row)
-    setActiveModal('edit')
-  }, [])
-  const handleApprove = useCallback((row) => {
-    setSelected(row)
-    setActiveModal('approve')
-  }, [])
-  const handleVerify = useCallback((row) => {
-    setSelected(row)
-    setActiveModal('verify')
-  }, [])
-  const handleFinance = useCallback((row) => {
-    setSelected(row)
-    setActiveModal('finance')
-  }, [])
-  const handleClose = useCallback(() => {
-    setActiveModal(null)
-    setSelected(null)
+  const openModal = useCallback((type, row) => setModal({ type, row }), [])
+  const closeModal = useCallback(() => {
+    setModal({ type: null, row: null })
     setDetail(null)
     setActivity([])
   }, [])
+
+  useEffect(() => {
+    if (!modal.row) return
+    let cancelled = false
+    Promise.all([
+      liquidationApi.getById(modal.row.id),
+      liquidationApi.getActivity({ liquidation_id: modal.row.id }),
+    ]).then(([full, acts]) => {
+      if (cancelled) return
+      setDetail(full)
+      setActivity(acts || [])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [modal.row])
+
+  // View now navigates to the dedicated detail page instead of opening a
+  // modal — see LiquidationDetailPage.
+  const handleView = useCallback(
+    (row) => navigate({ to: '/workbench/liquidationDetail', search: { id: String(row.id) } }),
+    [navigate],
+  )
+  const handleEdit = useCallback((row) => openModal('edit', row), [openModal])
+  const handleApprove = useCallback((row) => openModal('approve', row), [openModal])
+  const handleVerify = useCallback((row) => openModal('verify', row), [openModal])
+  const handleFinance = useCallback((row) => openModal('finance', row), [openModal])
 
   const receiptForSelected = useMemo(
     () => [...activity].reverse().find((a) => a.receipt)?.receipt,
@@ -167,14 +168,15 @@ function LiquidationPage() {
             maxHeight="h-full"
             containerClassName="h-full flex flex-col min-h-0"
             emptyMessage="No liquidations found."
+            onRowClick={handleView}
           />
         )}
       </div>
 
-      {activeModal === 'edit' && detail && (
+      {modal.type === 'edit' && detail && (
         <CreateLiquidationModal
           isOpen
-          onClose={handleClose}
+          onClose={closeModal}
           onUpdate={(payload) => editLiquidation(payload.id, payload)}
           isSubmitting={isMutating}
           editingLiquidation={detail}
@@ -183,36 +185,28 @@ function LiquidationPage() {
           modes={modes}
         />
       )}
-      {activeModal === 'view' && detail && (
-        <ViewLiquidationModal
-          isOpen
-          onClose={handleClose}
-          liquidation={detail}
-          activity={activity}
-          getEmployeeName={getEmployeeName}
-          getModeName={getModeName}
-        />
-      )}
-      {activeModal === 'approve' && detail && (
+
+      {modal.type === 'approve' && detail && (
         <ApproveLiquidationModal
           isOpen
-          onClose={handleClose}
+          onClose={closeModal}
           liquidation={detail}
           receipt={receiptForSelected}
-          onApprove={(p) => approveLiquidation(selected.id, p)}
-          onReject={(p) => rejectLiquidation(selected.id, p)}
+          onApprove={(p) => approveLiquidation(modal.row.id, p)}
+          onReject={(p) => rejectLiquidation(modal.row.id, p)}
           isSubmitting={isMutating}
           getEmployeeName={getEmployeeName}
         />
       )}
-      {activeModal === 'verify' && detail && (
+
+      {modal.type === 'verify' && detail && (
         <VerifyLiquidationModal
           isOpen
-          onClose={handleClose}
+          onClose={closeModal}
           liquidation={detail}
           receipt={receiptForSelected}
-          onVerify={(p) => verifyLiquidation(selected.id, p)}
-          onReject={(p) => rejectLiquidation(selected.id, p)}
+          onVerify={(p) => verifyLiquidation(modal.row.id, p)}
+          onReject={(p) => rejectLiquidation(modal.row.id, p)}
           isSubmitting={isMutating}
           getEmployeeName={getEmployeeName}
           revolvingFunds={eligibleFundsForVerify}
@@ -221,13 +215,14 @@ function LiquidationPage() {
           getFundLabel={getFundLabel}
         />
       )}
-      {activeModal === 'finance' && detail && (
+
+      {modal.type === 'finance' && detail && (
         <FinanceReviewModal
           isOpen
-          onClose={handleClose}
+          onClose={closeModal}
           liquidation={detail}
-          onComplete={(p) => completeLiquidation(selected.id, p)}
-          onMarkIncomplete={(p) => markIncomplete(selected.id, p)}
+          onComplete={(p) => completeLiquidation(modal.row.id, p)}
+          onMarkIncomplete={(p) => markIncomplete(modal.row.id, p)}
           isSubmitting={isMutating}
         />
       )}

@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
-import { masterDistrictApi, masterModeOfTransportationApi } from '../api/liquidationApi'
+import { masterDistrictApi } from '../api/liquidationApi'
+import { masterTransportationApi } from '../api/masterTransportationApi'
 
-// Defensive unwrap — handles a bare array, { data: [...] } (matches
-// getMasterModeOfTransportation's actual response shape), or
-// { result: [...] }, so this works regardless of whether the api layer
-// already unwrapped the response.
+// Defensive unwrap — masterTransportationApi.getAll() already unwraps to
+// a bare array, but this stays in case that ever changes or district's
+// response shape differs.
 const unwrap = (res) => {
   if (Array.isArray(res)) return res
   if (Array.isArray(res?.data)) return res.data
@@ -21,7 +21,12 @@ export function useLiquidationMasterData() {
       .getAll()
       .then((res) => setDistricts(unwrap(res)))
       .catch(() => setDistricts([]))
-    masterModeOfTransportationApi
+
+    // FIXED: was pulling masterModeOfTransportationApi from
+    // liquidationApi.js, which hits '/master-modeoftransportation' — a
+    // path that doesn't exist. masterTransportationApi hits the real
+    // route, '/master-mode-of-transportation'.
+    masterTransportationApi
       .getAll()
       .then((res) => setModes(unwrap(res)))
       .catch(() => setModes([]))

@@ -35,7 +35,7 @@ export function createLiquidationColumns({
       accessorKey: 'reference_id',
       sortable: true,
       cell: (row) => (
-        <span className="font-semibold text-slate-900 text-sm">
+        <span className="font-semibold text-slate-900 text-sm hover:text-[#E31837] hover:underline">
           {row.reference_id || `#${row.id}`}
         </span>
       ),

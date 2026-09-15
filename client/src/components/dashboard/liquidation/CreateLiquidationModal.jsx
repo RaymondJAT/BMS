@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { Image } from 'antd'
 import { Modal } from '../../ui/Modal'
 import { Plus, Trash2, Upload, X } from 'lucide-react'
 
@@ -285,239 +286,253 @@ export default function CreateLiquidationModal({
             </button>
           </div>
 
-          <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white shadow-xs">
-            <div className={isTravel ? 'min-w-437.5 p-2 space-y-2' : 'min-w-225 p-2 space-y-2'}>
-              {/* TABLE HEADER */}
-              <div
-                className={`sticky top-0 z-10 bg-white grid gap-2 px-2 py-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100 ${
-                  isTravel ? 'grid-cols-[repeat(16,minmax(0,1fr))]' : 'grid-cols-12'
-                }`}
-              >
-                {isTravel ? (
-                  <>
-                    <div className="col-span-1">Date</div>
-                    <div className="col-span-1">RT #</div>
-                    <div className="col-span-2">Store Name</div>
-                    <div className="col-span-2">Particulars</div>
-                    <div className="col-span-2">Purpose</div>
-                    <div className="col-span-1">From</div>
-                    <div className="col-span-1">To</div>
-                    <div className="col-span-2">Transport</div>
-                    <div className="col-span-1">Amount</div>
-                    <div className="col-span-2">Receipts</div>
-                    <div className="col-span-1 text-right pr-2">Action</div>
-                  </>
-                ) : (
-                  <>
-                    <div className="col-span-2">Date</div>
-                    <div className="col-span-2">Particulars</div>
-                    <div className="col-span-3">Purpose</div>
-                    <div className="col-span-2">Amount</div>
-                    <div className="col-span-2">Receipts</div>
-                    <div className="col-span-1 text-right pr-2">Action</div>
-                  </>
-                )}
-              </div>
-
-              {/* TABLE ROWS */}
-              {items.map((it, index) => (
+          {/* One PreviewGroup around the whole list so a user can click
+              any thumbnail and arrow through every receipt across every
+              line in this liquidation, not just the ones on that line. */}
+          <Image.PreviewGroup>
+            <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white shadow-xs">
+              <div className={isTravel ? 'min-w-437.5 p-2 space-y-2' : 'min-w-225 p-2 space-y-2'}>
+                {/* TABLE HEADER */}
                 <div
-                  key={index}
-                  className={`grid gap-2 items-center p-1.5 bg-slate-50/70 hover:bg-slate-100/60 rounded-lg border border-slate-200/60 transition-colors ${
+                  className={`sticky top-0 z-10 bg-white grid gap-2 px-2 py-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100 ${
                     isTravel ? 'grid-cols-[repeat(16,minmax(0,1fr))]' : 'grid-cols-12'
                   }`}
                 >
-                  {/* Date Input */}
-                  <div className={isTravel ? 'col-span-1' : 'col-span-2'}>
-                    <input
-                      type="date"
-                      required
-                      value={it.date}
-                      onChange={(e) => updateItem(index, 'date', e.target.value)}
-                      className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                    />
-                  </div>
-
-                  {/* Travel Fields */}
-                  {isTravel && (
+                  {isTravel ? (
                     <>
-                      <div className="col-span-1">
-                        <input
-                          type="text"
-                          placeholder="RT#"
-                          required
-                          value={it.rt}
-                          onChange={(e) => updateItem(index, 'rt', e.target.value)}
-                          className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <select
-                          required
-                          value={it.store_name}
-                          onChange={(e) => updateItem(index, 'store_name', e.target.value)}
-                          className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                        >
-                          <option value="">Store...</option>
-                          {storeOptions.map((d) => (
-                            <option key={d.id} value={d.store_name}>
-                              {d.store_name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                      <div className="col-span-1">Date</div>
+                      <div className="col-span-1">RT #</div>
+                      <div className="col-span-2">Store Name</div>
+                      <div className="col-span-2">Particulars</div>
+                      <div className="col-span-2">Purpose</div>
+                      <div className="col-span-1">From</div>
+                      <div className="col-span-1">To</div>
+                      <div className="col-span-2">Transport</div>
+                      <div className="col-span-1">Amount</div>
+                      <div className="col-span-2">Receipts</div>
+                      <div className="col-span-1 text-right pr-2">Action</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="col-span-2">Date</div>
+                      <div className="col-span-2">Particulars</div>
+                      <div className="col-span-3">Purpose</div>
+                      <div className="col-span-2">Amount</div>
+                      <div className="col-span-2">Receipts</div>
+                      <div className="col-span-1 text-right pr-2">Action</div>
                     </>
                   )}
+                </div>
 
-                  {/* Particulars Dropdown */}
-                  <div className={isTravel ? 'col-span-2' : 'col-span-2'}>
-                    <select
-                      required
-                      value={it.particulars}
-                      onChange={(e) => updateItem(index, 'particulars', e.target.value)}
-                      className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                    >
-                      <option value="">Select Particular...</option>
-                      {particulars.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name || p.description}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Purpose — free-text, distinct from Particulars' fixed category */}
-                  <div className={isTravel ? 'col-span-2' : 'col-span-3'}>
-                    <input
-                      type="text"
-                      placeholder="What was this for?"
-                      required
-                      value={it.purpose}
-                      onChange={(e) => updateItem(index, 'purpose', e.target.value)}
-                      className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                    />
-                  </div>
-
-                  {/* Travel-only Location and Transport Inputs */}
-                  {isTravel && (
-                    <>
-                      <div className="col-span-1">
-                        <input
-                          type="text"
-                          placeholder="From"
-                          required
-                          value={it.from}
-                          onChange={(e) => updateItem(index, 'from', e.target.value)}
-                          className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                        />
-                      </div>
-                      <div className="col-span-1">
-                        <input
-                          type="text"
-                          placeholder="To"
-                          required
-                          value={it.to}
-                          onChange={(e) => updateItem(index, 'to', e.target.value)}
-                          className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <select
-                          required
-                          value={it.mode_of_transportation_id}
-                          onChange={(e) =>
-                            updateItem(index, 'mode_of_transportation_id', e.target.value)
-                          }
-                          className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                        >
-                          <option value="">Mode...</option>
-                          {modes.map((m) => (
-                            <option key={m.id} value={m.id}>
-                              {m.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </>
-                  )}
-
-                  {/* Amount Field */}
-                  <div className={isTravel ? 'col-span-1' : 'col-span-2'}>
-                    <div className="relative">
-                      <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
-                        ₱
-                      </span>
+                {/* TABLE ROWS */}
+                {items.map((it, index) => (
+                  <div
+                    key={index}
+                    className={`grid gap-2 items-start p-1.5 bg-slate-50/70 hover:bg-slate-100/60 rounded-lg border border-slate-200/60 transition-colors ${
+                      isTravel ? 'grid-cols-[repeat(16,minmax(0,1fr))]' : 'grid-cols-12'
+                    }`}
+                  >
+                    {/* Date Input */}
+                    <div className={isTravel ? 'col-span-1' : 'col-span-2'}>
                       <input
-                        type="number"
-                        step="0.01"
-                        min="0.01"
+                        type="date"
                         required
-                        placeholder="0.00"
-                        value={it.amount}
-                        onChange={(e) => updateItem(index, 'amount', e.target.value)}
-                        className="w-full pl-4 pr-1.5 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                        value={it.date}
+                        onChange={(e) => updateItem(index, 'date', e.target.value)}
+                        className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
                       />
                     </div>
-                  </div>
 
-                  {/* Receipt Upload & Previews */}
-                  <div className={isTravel ? 'col-span-2' : 'col-span-2'}>
-                    <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 max-w-full">
-                      <label
-                        className="inline-flex items-center justify-center h-7 px-2 gap-1 bg-white border border-slate-300 hover:border-slate-400 rounded-md cursor-pointer shrink-0 text-[11px] text-slate-600 font-medium"
-                        title="Upload receipt(s) for this line"
-                      >
-                        <Upload className="w-3.5 h-3.5 text-slate-500" />
-                        <span>Upload</span>
-                        <input
-                          type="file"
-                          multiple
-                          accept="image/jpeg,image/png,image/webp"
-                          onChange={(e) => handleItemReceiptsChange(index, e.target.files)}
-                          className="hidden"
-                        />
-                      </label>
-
-                      {(it.receipts || []).map((src, ri) => (
-                        <div
-                          key={ri}
-                          className="relative group w-7 h-7 rounded border border-slate-200 overflow-hidden bg-slate-100 shrink-0"
-                        >
-                          <img
-                            src={src}
-                            alt={`Receipt ${ri + 1}`}
-                            className="w-full h-full object-cover"
+                    {/* Travel Fields */}
+                    {isTravel && (
+                      <>
+                        <div className="col-span-1">
+                          <input
+                            type="text"
+                            placeholder="RT#"
+                            required
+                            value={it.rt}
+                            onChange={(e) => updateItem(index, 'rt', e.target.value)}
+                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
                           />
-                          <button
-                            type="button"
-                            onClick={() => removeItemReceipt(index, ri)}
-                            className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer"
-                            title="Remove receipt"
-                          >
-                            <X className="w-3 h-3 text-white" />
-                          </button>
                         </div>
-                      ))}
+                        <div className="col-span-2">
+                          <select
+                            required
+                            value={it.store_name}
+                            onChange={(e) => updateItem(index, 'store_name', e.target.value)}
+                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                          >
+                            <option value="">Store...</option>
+                            {storeOptions.map((d) => (
+                              <option key={d.id} value={d.store_name}>
+                                {d.store_name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Particulars Dropdown */}
+                    <div className="col-span-2">
+                      <select
+                        required
+                        value={it.particulars}
+                        onChange={(e) => updateItem(index, 'particulars', e.target.value)}
+                        className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                      >
+                        <option value="">Select Particular...</option>
+                        {particulars.map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name || p.description}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Purpose */}
+                    <div className={isTravel ? 'col-span-2' : 'col-span-3'}>
+                      <input
+                        type="text"
+                        placeholder="What was this for?"
+                        required
+                        value={it.purpose}
+                        onChange={(e) => updateItem(index, 'purpose', e.target.value)}
+                        className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                      />
+                    </div>
+
+                    {/* Travel-only Location and Transport Inputs */}
+                    {isTravel && (
+                      <>
+                        <div className="col-span-1">
+                          <input
+                            type="text"
+                            placeholder="From"
+                            required
+                            value={it.from}
+                            onChange={(e) => updateItem(index, 'from', e.target.value)}
+                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                          />
+                        </div>
+                        <div className="col-span-1">
+                          <input
+                            type="text"
+                            placeholder="To"
+                            required
+                            value={it.to}
+                            onChange={(e) => updateItem(index, 'to', e.target.value)}
+                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                          />
+                        </div>
+                        <div className="col-span-2">
+                          <select
+                            required
+                            value={it.mode_of_transportation_id}
+                            onChange={(e) =>
+                              updateItem(index, 'mode_of_transportation_id', e.target.value)
+                            }
+                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                          >
+                            <option value="">Mode...</option>
+                            {modes.map((m) => (
+                              <option key={m.id} value={m.id}>
+                                {m.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </>
+                    )}
+
+                    {/* Amount Field */}
+                    <div className={isTravel ? 'col-span-1' : 'col-span-2'}>
+                      <div className="relative">
+                        <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
+                          ₱
+                        </span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0.01"
+                          required
+                          placeholder="0.00"
+                          value={it.amount}
+                          onChange={(e) => updateItem(index, 'amount', e.target.value)}
+                          className="w-full pl-4 pr-1.5 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Receipt Upload & Previews — flex-wrap instead of a
+                        horizontal scrollbar, so thumbnails flow onto a
+                        second line using the row's own width. */}
+                    <div className={isTravel ? 'col-span-2' : 'col-span-2'}>
+                      <div className="flex items-center gap-1.5 flex-wrap py-0.5">
+                        <label
+                          className="inline-flex items-center justify-center h-7 px-2 gap-1 bg-white border border-slate-300 hover:border-slate-400 rounded-md cursor-pointer shrink-0 text-[11px] text-slate-600 font-medium"
+                          title="Upload receipt(s) for this line"
+                        >
+                          <Upload className="w-3.5 h-3.5 text-slate-500" />
+                          <span>Upload</span>
+                          <input
+                            type="file"
+                            multiple
+                            accept="image/jpeg,image/png,image/webp"
+                            onChange={(e) => handleItemReceiptsChange(index, e.target.files)}
+                            className="hidden"
+                          />
+                        </label>
+
+                        {(it.receipts || []).map((src, ri) => (
+                          <div
+                            key={ri}
+                            className="relative group w-8 h-8 rounded border border-slate-200 overflow-hidden bg-slate-100 shrink-0"
+                          >
+                            <Image
+                              src={src}
+                              width={32}
+                              height={32}
+                              style={{ objectFit: 'cover' }}
+                              preview={{
+                                mask: null,
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                removeItemReceipt(index, ri)
+                              }}
+                              className="absolute -top-1 -right-1 bg-red-600 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer z-10"
+                              title="Remove"
+                            >
+                              <X className="w-2.5 h-2.5" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Remove Button */}
+                    <div className="col-span-1 flex justify-end">
+                      {items.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeItem(index)}
+                          className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer shrink-0"
+                          title="Remove line"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
-
-                  {/* Remove Button */}
-                  <div className="col-span-1 flex justify-end">
-                    {items.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeItem(index)}
-                        className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer shrink-0"
-                        title="Remove line"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
+          </Image.PreviewGroup>
         </div>
 
         {/* BOTTOM FIXED FOOTER */}
