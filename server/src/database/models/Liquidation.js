@@ -18,6 +18,7 @@
  * @typedef {Object} ItemCols
  * @property {'li_id'} id
  * @property {'li_liquidation_id'} liquidation_id
+ * @property {'li_type'} type
  * @property {'li_date'} date
  * @property {'li_rt'} rt
  * @property {'li_store_name'} store_name
@@ -26,6 +27,7 @@
  * @property {'li_to'} to
  * @property {'li_mode_of_transportation_id'} mode_of_transportation_id
  * @property {'li_amount'} amount
+ * @property {'li_receipts'} receipts
  */
 
 /**
@@ -66,6 +68,7 @@ const Liquidation = {
     cols: {
       id: 'li_id',
       liquidation_id: 'li_liquidation_id',
+      type: 'li_type',
       date: 'li_date',
       rt: 'li_rt',
       store_name: 'li_store_name',
@@ -74,9 +77,10 @@ const Liquidation = {
       to: 'li_to',
       mode_of_transportation_id: 'li_mode_of_transportation_id',
       amount: 'li_amount',
+      receipts: 'li_receipts',
     },
-    select: ['li_id', 'li_liquidation_id', 'li_date', 'li_rt', 'li_store_name', 'li_particulars', 'li_from', 'li_to', 'li_mode_of_transportation_id', 'li_amount'],
-    insert: ['li_liquidation_id', 'li_rt', 'li_store_name', 'li_particulars', 'li_from', 'li_to', 'li_mode_of_transportation_id', 'li_amount'],
+    select: ['li_id', 'li_liquidation_id', 'li_type', 'li_date', 'li_rt', 'li_store_name', 'li_particulars', 'li_from', 'li_to', 'li_mode_of_transportation_id', 'li_amount', 'li_receipts'],
+    insert: ['li_liquidation_id', 'li_type', 'li_rt', 'li_store_name', 'li_particulars', 'li_from', 'li_to', 'li_mode_of_transportation_id', 'li_amount', 'li_receipts'],
   },
   Activity: {
     table: 'liquidation_activity',

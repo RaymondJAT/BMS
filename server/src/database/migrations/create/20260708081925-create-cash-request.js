@@ -20,7 +20,7 @@ module.exports = {
         allowNull: false,
       },
       cr_purpose: {
-        type: Sequelize.STRING(300),
+        type: Sequelize.TEXT('long'),
         allowNull: false,
       },
       cr_project: {

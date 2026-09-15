@@ -21,17 +21,22 @@ module.exports = {
         onDelete: 'RESTRICT',
         allowNull: false,
       },
+      li_type: {
+        type: Sequelize.ENUM('TRAVEL', 'MISCELLANEOUS'),
+        allowNull: false,
+        defaultValue: 'TRAVEL',
+      },
       li_date: {
         type: Sequelize.DATE,
         allowNull: false,
       },
       li_rt: {
         type: Sequelize.STRING(300),
-        allowNull: false,
+        allowNull: true,
       },
       li_store_name: {
         type: Sequelize.STRING(300),
-        allowNull: false,
+        allowNull: true,
       },
       li_particulars: {
         type: Sequelize.INTEGER,
@@ -43,13 +48,17 @@ module.exports = {
         onDelete: 'RESTRICT',
         allowNull: false,
       },
+      li_purpose: {
+        type: Sequelize.TEXT('long'),
+        allowNull: false,
+      },
       li_from: {
         type: Sequelize.STRING(100),
-        allowNull: false,
+        allowNull: true,
       },
       li_to: {
         type: Sequelize.STRING(100),
-        allowNull: false,
+        allowNull: true,
       },
       li_mode_of_transportation_id: {
         type: Sequelize.INTEGER,
@@ -59,11 +68,15 @@ module.exports = {
         },
         onUpdate: 'CASCADE',
         onDelete: 'RESTRICT',
-        allowNull: false,
+        allowNull: true,
       },
       li_amount: {
         type: Sequelize.DECIMAL(10, 2),
         allowNull: false,
+      },
+      li_receipts: {
+        type: Sequelize.TEXT('long'),
+        allowNull: true,
       },
     })
   },

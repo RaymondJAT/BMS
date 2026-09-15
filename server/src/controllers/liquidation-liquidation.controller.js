@@ -241,28 +241,32 @@ const loadLiquidationForAction = async (
 }
 
 /**
- * Every liquidation_item column below is NOT NULL per the migration —
- * date, rt, store_name, particulars, from, to, mode_of_transportation_id,
- * amount. No optional fields at line level in this schema. (li_particulars
- * is its own thing — an FK on liquidation_item — unrelated to
- * cash_disbursement's purpose field; see insertReimbursementDisbursement's
- * docstring below for why those two were previously confused.)
+ * Every liquidation_item column is NOT NULL per the ORIGINAL migration —
+ * EXCEPT the travel-specific fields (rt, store_name, from, to,
+ * mode_of_transportation_id), which are only required when
+ * item.type === 'TRAVEL'. li_purpose is required on EVERY line
+ * regardless of type — it's the free-text "what this specific line was
+ * for," distinct from li_particulars' fixed category dropdown.
  */
 const validateItems = (items) => {
   if (!Array.isArray(items) || items.length === 0) {
     return 'At least one liquidation line is required.'
   }
   for (const item of items) {
-    if (
-      !item.date ||
-      !item.rt ||
-      !item.store_name ||
-      !item.particulars ||
-      !item.from ||
-      !item.to ||
-      !item.mode_of_transportation_id
-    ) {
-      return 'Each line requires date, RT#, store name, particulars, from, to, and mode of transportation.'
+    const type = item.type === 'MISCELLANEOUS' ? 'MISCELLANEOUS' : 'TRAVEL'
+    if (!item.date || !item.particulars || !item.purpose) {
+      return 'Each line requires a date, particulars, and purpose.'
+    }
+    if (type === 'TRAVEL') {
+      if (
+        !item.rt ||
+        !item.store_name ||
+        !item.from ||
+        !item.to ||
+        !item.mode_of_transportation_id
+      ) {
+        return 'Each Travel line requires RT#, store name, from, to, and mode of transportation.'
+      }
     }
     if (parseNum(item.amount) <= 0) {
       return 'Each line requires an amount greater than zero.'
@@ -271,19 +275,52 @@ const validateItems = (items) => {
   return null
 }
 
+/**
+ * Per-line receipt requirement — only enforced on brand-new submissions
+ * (createLiquidation), matching the original single-receipt rule's
+ * "required on create, optional on edit" behavior. Not called from
+ * updateLiquidation.
+ */
+const validateItemReceipts = (items) => {
+  for (const item of items) {
+    if (!Array.isArray(item.receipts) || item.receipts.length === 0) {
+      return 'Every liquidation line needs at least one receipt image.'
+    }
+  }
+  return null
+}
+
 const sumItemAmounts = (items) => items.reduce((sum, item) => sum + parseNum(item.amount), 0)
 
-const buildItemInsertData = (liquidationId, item) => ({
-  [Liquidation.Item.cols.liquidation_id]: liquidationId,
-  [Liquidation.Item.cols.date]: item.date,
-  [Liquidation.Item.cols.rt]: item.rt,
-  [Liquidation.Item.cols.store_name]: item.store_name,
-  [Liquidation.Item.cols.particulars]: item.particulars,
-  [Liquidation.Item.cols.from]: item.from,
-  [Liquidation.Item.cols.to]: item.to,
-  [Liquidation.Item.cols.mode_of_transportation_id]: item.mode_of_transportation_id,
-  [Liquidation.Item.cols.amount]: parseNum(item.amount),
-})
+/**
+ * Travel-only fields are written as NULL for a MISCELLANEOUS line rather
+ * than empty strings — NULL is the honest "not applicable" value now
+ * that the type-support migration made these columns nullable, and
+ * stays distinguishable from a Travel line where a field was mistakenly
+ * left blank (validateItems above already prevents that case anyway).
+ */
+const buildItemInsertData = (liquidationId, item) => {
+  const type = item.type === 'MISCELLANEOUS' ? 'MISCELLANEOUS' : 'TRAVEL'
+  const isTravel = type === 'TRAVEL'
+  return {
+    [Liquidation.Item.cols.liquidation_id]: liquidationId,
+    [Liquidation.Item.cols.date]: item.date,
+    [Liquidation.Item.cols.type]: type,
+    [Liquidation.Item.cols.rt]: isTravel ? item.rt : null,
+    [Liquidation.Item.cols.store_name]: isTravel ? item.store_name : null,
+    [Liquidation.Item.cols.particulars]: item.particulars,
+    [Liquidation.Item.cols.purpose]: item.purpose,
+    [Liquidation.Item.cols.from]: isTravel ? item.from : null,
+    [Liquidation.Item.cols.to]: isTravel ? item.to : null,
+    [Liquidation.Item.cols.mode_of_transportation_id]: isTravel
+      ? item.mode_of_transportation_id
+      : null,
+    [Liquidation.Item.cols.amount]: parseNum(item.amount),
+    [Liquidation.Item.cols.receipts]: JSON.stringify(
+      Array.isArray(item.receipts) ? item.receipts : [],
+    ),
+  }
+}
 
 // ==========================================
 // SETTLEMENT MATH (extracted from verifyLiquidation)
@@ -480,11 +517,12 @@ const createLiquidation = async (req, res) => {
       .status(400)
       .json({ message: 'Missing required fields: cash_request_id, description' })
   }
-  if (!receipt) {
-    return res.status(400).json({ message: 'A receipt image is required to submit a liquidation.' })
-  }
+
   const itemError = validateItems(items)
   if (itemError) return res.status(400).json({ message: itemError })
+
+  const receiptError = validateItemReceipts(items)
+  if (receiptError) return res.status(400).json({ message: receiptError })
 
   try {
     const cr = await getCashRequestById(cash_request_id)
@@ -660,7 +698,8 @@ const updateLiquidation = async (req, res) => {
                 : `Edited and resubmitted after being returned as ${currentStatus} — back in the Team Leader queue.`,
             // la_receipt is NOT NULL — '' satisfies the constraint when no
             // new receipt is attached on this edit.
-            [Liquidation.Activity.cols.receipt]: receipt || '',
+            [Liquidation.Activity.cols.receipt]:
+              receipt || items.flatMap((it) => it.receipts || [])[0] || '',
             [Liquidation.Activity.cols.created_by]: userId,
           })
           .build(),
@@ -1307,22 +1346,34 @@ const getLiquidationDetail = async (req, res) => {
 
     const items = await Query(
       `SELECT
-         li_id AS id,
-         li_liquidation_id AS liquidation_id,
-         li_date AS date,
-         li_rt AS rt,
-         li_store_name AS store_name,
-         li_particulars AS particulars,
-         li_from AS \`from\`,
-         li_to AS \`to\`,
-         li_mode_of_transportation_id AS mode_of_transportation_id,
-         li_amount AS amount
-       FROM liquidation_item
-       WHERE li_liquidation_id = ?`,
+     li_id AS id,
+     li_liquidation_id AS liquidation_id,
+     li_date AS date,
+     li_type AS type,
+     li_rt AS rt,
+     li_store_name AS store_name,
+     li_particulars AS particulars,
+     li_purpose AS purpose,
+     li_from AS \`from\`,
+     li_to AS \`to\`,
+     li_mode_of_transportation_id AS mode_of_transportation_id,
+     li_amount AS amount,
+     li_receipts AS receipts
+   FROM liquidation_item
+   WHERE li_liquidation_id = ?`,
       [id],
     )
+    const parsedItems = items.map((it) => {
+      let receipts = []
+      try {
+        receipts = it.receipts ? JSON.parse(it.receipts) : []
+      } catch {
+        receipts = []
+      }
+      return { ...it, receipts }
+    })
 
-    return res.status(200).json({ ...lq, items })
+    return res.status(200).json({ ...lq, items: parsedItems })
   } catch (error) {
     console.error('Error in getLiquidationDetail:', error)
     return res.status(500).json({ message: 'Error retrieving liquidation detail' })

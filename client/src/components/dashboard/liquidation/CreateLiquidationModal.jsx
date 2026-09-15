@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Modal } from '../../ui/Modal'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus, Trash2, Upload, X } from 'lucide-react'
 
 const formatCurrency = (val) =>
   `₱${parseFloat(val || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -13,66 +13,67 @@ const emptyItem = () => ({
   rt: '',
   store_name: '',
   particulars: '',
+  purpose: '',
   from: '',
   to: '',
   mode_of_transportation_id: '',
   amount: '',
+  receipts: [],
 })
 
-/**
- * Requester submits a Liquidation for a COMPLETED Cash Request, or
- * edits/resubmits one returned as REJECTED/INCOMPLETE (backend resets to
- * PENDING — see updateLiquidation). Every liquidation_item field is
- * required per the schema (li_rt, li_store_name, li_from, li_to,
- * li_mode_of_transportation_id, li_particulars, li_amount are all
- * NOT NULL) — no optional line fields exist in this schema.
- *
- * Receipt is ONE image per submission, attached to the activity log
- * entry (la_receipt) — liquidation_item has no receipt column at all, so
- * there is no per-line upload.
- */
 export default function CreateLiquidationModal({
   isOpen,
   onClose,
   onCreate,
   onUpdate,
   isSubmitting,
-  cashRequest, // { id, reference_id } — required for create mode
-  cashReceived, // disbursement_amount snapshot for create mode
-  editingLiquidation = null, // full liquidation + items, for edit mode
+  cashRequest,
+  cashReceived,
+  editingLiquidation = null,
   districts = [],
   particulars = [],
   modes = [],
 }) {
   const isEditMode = Boolean(editingLiquidation)
 
-  const [description, setDescription] = useState('')
-  const [receipt, setReceipt] = useState('')
+  const [liquidationType, setLiquidationType] = useState('TRAVEL')
   const [items, setItems] = useState([emptyItem()])
   const [formError, setFormError] = useState(null)
 
+  const storeOptions = useMemo(() => {
+    const seen = new Set()
+    return districts.filter((d) => {
+      if (!d.store_name || seen.has(d.store_name)) return false
+      seen.add(d.store_name)
+      return true
+    })
+  }, [districts])
+
   useEffect(() => {
     if (!isOpen) {
-      setDescription('')
-      setReceipt('')
+      setLiquidationType('TRAVEL')
       setItems([emptyItem()])
       setFormError(null)
       return
     }
     if (editingLiquidation) {
-      setDescription(editingLiquidation.description || '')
-      setReceipt('')
+      const editItems = editingLiquidation.items || []
+      setLiquidationType(editItems[0]?.type === 'MISCELLANEOUS' ? 'MISCELLANEOUS' : 'TRAVEL')
       setItems(
-        (editingLiquidation.items || []).map((it) => ({
-          date: it.date?.slice(0, 10) || '',
-          rt: it.rt || '',
-          store_name: it.store_name || '',
-          particulars: it.particulars || '',
-          from: it.from || '',
-          to: it.to || '',
-          mode_of_transportation_id: it.mode_of_transportation_id || '',
-          amount: it.amount ?? '',
-        })) || [emptyItem()],
+        editItems.length
+          ? editItems.map((it) => ({
+              date: it.date?.slice(0, 10) || '',
+              rt: it.rt || '',
+              store_name: it.store_name || '',
+              particulars: it.particulars || '',
+              purpose: it.purpose || '',
+              from: it.from || '',
+              to: it.to || '',
+              mode_of_transportation_id: it.mode_of_transportation_id || '',
+              amount: it.amount ?? '',
+              receipts: Array.isArray(it.receipts) ? it.receipts : [],
+            }))
+          : [emptyItem()],
       )
     }
   }, [isOpen, editingLiquidation])
@@ -88,65 +89,118 @@ export default function CreateLiquidationModal({
   const summaryLabel =
     difference > 0 ? 'Cash to Return' : difference < 0 ? 'Reimbursement' : 'Fully Liquidated'
 
+  const handleTypeChange = (newType) => {
+    setLiquidationType(newType)
+    if (newType === 'MISCELLANEOUS') {
+      setItems((prev) =>
+        prev.map((it) => ({
+          ...it,
+          rt: '',
+          store_name: '',
+          from: '',
+          to: '',
+          mode_of_transportation_id: '',
+        })),
+      )
+    }
+  }
+
   const updateItem = (index, field, value) =>
     setItems((prev) => prev.map((it, i) => (i === index ? { ...it, [field]: value } : it)))
+
   const addItem = () => setItems((prev) => [...prev, emptyItem()])
+
   const removeItem = (index) => {
     if (items.length <= 1) return
     if (!window.confirm('Remove this liquidation line?')) return
     setItems((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const handleReceiptChange = (file) => {
+  const handleItemReceiptsChange = (index, files) => {
     setFormError(null)
-    if (!file) return
-    if (!ACCEPTED_TYPES.includes(file.type)) {
-      setFormError('Receipt must be a JPEG, PNG, or WEBP image.')
-      return
+    if (!files || files.length === 0) return
+
+    const fileList = Array.from(files)
+    for (const file of fileList) {
+      if (!ACCEPTED_TYPES.includes(file.type)) {
+        setFormError(`File "${file.name}" must be a JPEG, PNG, or WEBP image.`)
+        return
+      }
+      if (file.size > MAX_FILE_BYTES) {
+        setFormError(`File "${file.name}" exceeds the 5MB limit.`)
+        return
+      }
     }
-    if (file.size > MAX_FILE_BYTES) {
-      setFormError('Receipt image must be under 5MB.')
-      return
-    }
-    const reader = new FileReader()
-    reader.onload = () => setReceipt(reader.result)
-    reader.readAsDataURL(file)
+
+    const readPromises = fileList.map(
+      (file) =>
+        new Promise((resolve) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(reader.result)
+          reader.readAsDataURL(file)
+        }),
+    )
+
+    Promise.all(readPromises).then((newImages) => {
+      setItems((prev) =>
+        prev.map((it, i) =>
+          i === index ? { ...it, receipts: [...(it.receipts || []), ...newImages] } : it,
+        ),
+      )
+    })
   }
+
+  const removeItemReceipt = (index, receiptIndex) => {
+    setItems((prev) =>
+      prev.map((it, i) =>
+        i === index ? { ...it, receipts: it.receipts.filter((_, ri) => ri !== receiptIndex) } : it,
+      ),
+    )
+  }
+
+  const isTravel = liquidationType === 'TRAVEL'
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setFormError(null)
 
-    if (!description.trim()) {
-      setFormError('Please provide a Purpose/Description.')
-      return
-    }
-    if (!isEditMode && !receipt) {
-      setFormError('A receipt image is required to submit a liquidation.')
-      return
-    }
     for (const it of items) {
+      if (!it.date || !it.particulars || !it.purpose?.trim()) {
+        setFormError('Every line requires a date, particulars, and purpose.')
+        return
+      }
       if (
-        !it.date ||
-        !it.rt ||
-        !it.store_name ||
-        !it.particulars ||
-        !it.from ||
-        !it.to ||
-        !it.mode_of_transportation_id
+        isTravel &&
+        (!it.rt || !it.store_name || !it.from || !it.to || !it.mode_of_transportation_id)
       ) {
-        setFormError(
-          'Every line requires date, RT#, store, particulars, from, to, and mode of transportation.',
-        )
+        setFormError('Every line requires RT#, store, from, to, and mode of transportation.')
         return
       }
       if (!parseFloat(it.amount) || parseFloat(it.amount) <= 0) {
         setFormError('Every line needs an amount greater than zero.')
         return
       }
+      if (!isEditMode && (!it.receipts || it.receipts.length === 0)) {
+        setFormError('Every line needs at least one receipt image.')
+        return
+      }
     }
 
-    const payload = { description, items, ...(receipt ? { receipt } : {}) }
+    const derivedDescription = isEditMode
+      ? editingLiquidation.description
+      : cashRequest?.purpose ||
+        cashRequest?.project ||
+        `Liquidation for ${cashRequest?.reference_id || cashRequest?.id}`
+
+    const itemsWithType = items.map((it) => ({ ...it, type: liquidationType }))
+    const allReceipts = itemsWithType.flatMap((it) => it.receipts || [])
+    const payload = {
+      items: itemsWithType,
+      receipts: allReceipts,
+      receipt: allReceipts[0] || '',
+      ...(isEditMode ? {} : { description: derivedDescription }),
+    }
+
     const result = isEditMode
       ? await onUpdate({ id: editingLiquidation.id, ...payload })
       : await onCreate({ cash_request_id: cashRequest.id, ...payload })
@@ -166,221 +220,349 @@ export default function CreateLiquidationModal({
           ? `${editingLiquidation?.reference_id} — correct and resubmit`
           : `Against Cash Request ${cashRequest?.reference_id || `#${cashRequest?.id}`}`
       }
-      maxWidth="max-w-3xl"
+      fullScreen
     >
-      <form onSubmit={handleSubmit} className="space-y-3 sm:space-y-3.5">
-        {formError && (
-          <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg font-medium">
-            {formError}
-          </div>
-        )}
-        {isEditMode && ['REJECTED', 'INCOMPLETE'].includes(editingLiquidation?.status) && (
-          <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg font-medium">
-            This liquidation was returned as {editingLiquidation.status}. Correct the details and
-            resubmit.
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-          <div>
-            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Purpose / Description <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              required
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
-            />
-          </div>
-          <div>
-            <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
-              Receipt {isEditMode ? '(replace, optional)' : <span className="text-red-500">*</span>}
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                onChange={(e) => handleReceiptChange(e.target.files?.[0])}
-                className="text-[11px] flex-1"
-              />
-              {receipt && (
-                <img
-                  src={receipt}
-                  alt="Receipt preview"
-                  className="w-9 h-9 object-cover rounded border border-slate-200"
-                />
-              )}
+      <form onSubmit={handleSubmit} className="flex flex-col h-full min-h-0">
+        {/* TOP HEADER SECTION WITH TYPE SELECTION */}
+        <div className="shrink-0 space-y-3 px-4 pt-4 border-b border-slate-200 pb-3 bg-slate-50/50">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Liquidation Type
+              </label>
+              <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-xs">
+                <button
+                  type="button"
+                  onClick={() => handleTypeChange('TRAVEL')}
+                  className={`px-4 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                    isTravel
+                      ? 'bg-[#E31837] text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Travel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleTypeChange('MISCELLANEOUS')}
+                  className={`px-4 py-1.5 text-xs font-bold rounded-md transition-colors cursor-pointer ${
+                    !isTravel
+                      ? 'bg-[#E31837] text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Miscellaneous
+                </button>
+              </div>
             </div>
           </div>
+
+          {formError && (
+            <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg font-medium">
+              {formError}
+            </div>
+          )}
+          {isEditMode && ['REJECTED', 'INCOMPLETE'].includes(editingLiquidation?.status) && (
+            <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-lg font-medium">
+              This liquidation was returned as {editingLiquidation.status}. Correct the details and
+              resubmit.
+            </div>
+          )}
         </div>
 
-        <datalist id="store-name-options">
-          {districts.map((d) => (
-            <option key={d.id} value={d.store_name} />
-          ))}
-        </datalist>
-
-        <div className="space-y-2">
-          <div className="flex items-center justify-between">
+        {/* SCROLLABLE TABLE BODY */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3">
+          <div className="flex items-center justify-between mb-2">
             <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-              Expense Lines
+              Expense Lines ({items.length})
             </span>
             <button
               type="button"
               onClick={addItem}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-[#E31837] hover:underline cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-[#E31837] bg-red-50 hover:bg-red-100 rounded-md transition-colors cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" /> Add Line
             </button>
           </div>
 
-          {items.map((it, index) => (
-            <div
-              key={index}
-              className="border border-slate-200 rounded-lg p-2.5 space-y-2 bg-slate-50/50"
-            >
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <input
-                  type="date"
-                  required
-                  value={it.date}
-                  onChange={(e) => updateItem(index, 'date', e.target.value)}
-                  className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                />
-                <input
-                  type="text"
-                  placeholder="RT#"
-                  required
-                  value={it.rt}
-                  onChange={(e) => updateItem(index, 'rt', e.target.value)}
-                  className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                />
-                <input
-                  type="text"
-                  placeholder="Store name"
-                  required
-                  list="store-name-options"
-                  value={it.store_name}
-                  onChange={(e) => updateItem(index, 'store_name', e.target.value)}
-                  className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                />
-                <select
-                  required
-                  value={it.particulars}
-                  onChange={(e) => updateItem(index, 'particulars', e.target.value)}
-                  className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                >
-                  <option value="">Particulars...</option>
-                  {particulars.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name || p.description}
-                    </option>
-                  ))}
-                </select>
+          <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white shadow-xs">
+            <div className={isTravel ? 'min-w-437.5 p-2 space-y-2' : 'min-w-225 p-2 space-y-2'}>
+              {/* TABLE HEADER */}
+              <div
+                className={`sticky top-0 z-10 bg-white grid gap-2 px-2 py-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100 ${
+                  isTravel ? 'grid-cols-[repeat(16,minmax(0,1fr))]' : 'grid-cols-12'
+                }`}
+              >
+                {isTravel ? (
+                  <>
+                    <div className="col-span-1">Date</div>
+                    <div className="col-span-1">RT #</div>
+                    <div className="col-span-2">Store Name</div>
+                    <div className="col-span-2">Particulars</div>
+                    <div className="col-span-2">Purpose</div>
+                    <div className="col-span-1">From</div>
+                    <div className="col-span-1">To</div>
+                    <div className="col-span-2">Transport</div>
+                    <div className="col-span-1">Amount</div>
+                    <div className="col-span-2">Receipts</div>
+                    <div className="col-span-1 text-right pr-2">Action</div>
+                  </>
+                ) : (
+                  <>
+                    <div className="col-span-2">Date</div>
+                    <div className="col-span-2">Particulars</div>
+                    <div className="col-span-3">Purpose</div>
+                    <div className="col-span-2">Amount</div>
+                    <div className="col-span-2">Receipts</div>
+                    <div className="col-span-1 text-right pr-2">Action</div>
+                  </>
+                )}
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                <input
-                  type="text"
-                  placeholder="From"
-                  required
-                  value={it.from}
-                  onChange={(e) => updateItem(index, 'from', e.target.value)}
-                  className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                />
-                <input
-                  type="text"
-                  placeholder="To"
-                  required
-                  value={it.to}
-                  onChange={(e) => updateItem(index, 'to', e.target.value)}
-                  className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                />
-                <select
-                  required
-                  value={it.mode_of_transportation_id}
-                  onChange={(e) => updateItem(index, 'mode_of_transportation_id', e.target.value)}
-                  className="px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
+
+              {/* TABLE ROWS */}
+              {items.map((it, index) => (
+                <div
+                  key={index}
+                  className={`grid gap-2 items-center p-1.5 bg-slate-50/70 hover:bg-slate-100/60 rounded-lg border border-slate-200/60 transition-colors ${
+                    isTravel ? 'grid-cols-[repeat(16,minmax(0,1fr))]' : 'grid-cols-12'
+                  }`}
                 >
-                  <option value="">Mode of Transport...</option>
-                  {modes.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
-                <div className="relative">
-                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">
-                    ₱
-                  </span>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    required
-                    placeholder="0.00"
-                    value={it.amount}
-                    onChange={(e) => updateItem(index, 'amount', e.target.value)}
-                    className="w-full pl-5 pr-2 py-1.5 bg-white border border-slate-200 rounded-lg text-xs"
-                  />
+                  {/* Date Input */}
+                  <div className={isTravel ? 'col-span-1' : 'col-span-2'}>
+                    <input
+                      type="date"
+                      required
+                      value={it.date}
+                      onChange={(e) => updateItem(index, 'date', e.target.value)}
+                      className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                    />
+                  </div>
+
+                  {/* Travel Fields */}
+                  {isTravel && (
+                    <>
+                      <div className="col-span-1">
+                        <input
+                          type="text"
+                          placeholder="RT#"
+                          required
+                          value={it.rt}
+                          onChange={(e) => updateItem(index, 'rt', e.target.value)}
+                          className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <select
+                          required
+                          value={it.store_name}
+                          onChange={(e) => updateItem(index, 'store_name', e.target.value)}
+                          className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                        >
+                          <option value="">Store...</option>
+                          {storeOptions.map((d) => (
+                            <option key={d.id} value={d.store_name}>
+                              {d.store_name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Particulars Dropdown */}
+                  <div className={isTravel ? 'col-span-2' : 'col-span-2'}>
+                    <select
+                      required
+                      value={it.particulars}
+                      onChange={(e) => updateItem(index, 'particulars', e.target.value)}
+                      className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                    >
+                      <option value="">Select Particular...</option>
+                      {particulars.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name || p.description}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Purpose — free-text, distinct from Particulars' fixed category */}
+                  <div className={isTravel ? 'col-span-2' : 'col-span-3'}>
+                    <input
+                      type="text"
+                      placeholder="What was this for?"
+                      required
+                      value={it.purpose}
+                      onChange={(e) => updateItem(index, 'purpose', e.target.value)}
+                      className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                    />
+                  </div>
+
+                  {/* Travel-only Location and Transport Inputs */}
+                  {isTravel && (
+                    <>
+                      <div className="col-span-1">
+                        <input
+                          type="text"
+                          placeholder="From"
+                          required
+                          value={it.from}
+                          onChange={(e) => updateItem(index, 'from', e.target.value)}
+                          className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <input
+                          type="text"
+                          placeholder="To"
+                          required
+                          value={it.to}
+                          onChange={(e) => updateItem(index, 'to', e.target.value)}
+                          className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <select
+                          required
+                          value={it.mode_of_transportation_id}
+                          onChange={(e) =>
+                            updateItem(index, 'mode_of_transportation_id', e.target.value)
+                          }
+                          className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                        >
+                          <option value="">Mode...</option>
+                          {modes.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Amount Field */}
+                  <div className={isTravel ? 'col-span-1' : 'col-span-2'}>
+                    <div className="relative">
+                      <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
+                        ₱
+                      </span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        required
+                        placeholder="0.00"
+                        value={it.amount}
+                        onChange={(e) => updateItem(index, 'amount', e.target.value)}
+                        className="w-full pl-4 pr-1.5 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Receipt Upload & Previews */}
+                  <div className={isTravel ? 'col-span-2' : 'col-span-2'}>
+                    <div className="flex items-center gap-1.5 overflow-x-auto py-0.5 max-w-full">
+                      <label
+                        className="inline-flex items-center justify-center h-7 px-2 gap-1 bg-white border border-slate-300 hover:border-slate-400 rounded-md cursor-pointer shrink-0 text-[11px] text-slate-600 font-medium"
+                        title="Upload receipt(s) for this line"
+                      >
+                        <Upload className="w-3.5 h-3.5 text-slate-500" />
+                        <span>Upload</span>
+                        <input
+                          type="file"
+                          multiple
+                          accept="image/jpeg,image/png,image/webp"
+                          onChange={(e) => handleItemReceiptsChange(index, e.target.files)}
+                          className="hidden"
+                        />
+                      </label>
+
+                      {(it.receipts || []).map((src, ri) => (
+                        <div
+                          key={ri}
+                          className="relative group w-7 h-7 rounded border border-slate-200 overflow-hidden bg-slate-100 shrink-0"
+                        >
+                          <img
+                            src={src}
+                            alt={`Receipt ${ri + 1}`}
+                            className="w-full h-full object-cover"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => removeItemReceipt(index, ri)}
+                            className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity cursor-pointer"
+                            title="Remove receipt"
+                          >
+                            <X className="w-3 h-3 text-white" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Remove Button */}
+                  <div className="col-span-1 flex justify-end">
+                    {items.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeItem(index)}
+                        className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors cursor-pointer shrink-0"
+                        title="Remove line"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-              {items.length > 1 && (
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => removeItem(index)}
-                    className="p-1 text-red-500 hover:bg-red-50 rounded cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              )}
+              ))}
             </div>
-          ))}
+          </div>
         </div>
 
-        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1">
-          <div className="flex justify-between">
-            <span className="text-slate-500">Cash Received</span>
-            <span className="font-semibold">{formatCurrency(cashReceivedAmount)}</span>
+        {/* BOTTOM FIXED FOOTER */}
+        <div className="shrink-0 border-t border-slate-200 bg-white px-4 py-3 space-y-2.5">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+            <div className="flex items-center justify-between sm:justify-start sm:gap-3 bg-slate-50 p-2 rounded-lg border border-slate-100">
+              <span className="text-slate-500 font-medium">Cash Received:</span>
+              <span className="font-bold text-slate-800">{formatCurrency(cashReceivedAmount)}</span>
+            </div>
+            <div className="flex items-center justify-between sm:justify-start sm:gap-3 bg-slate-50 p-2 rounded-lg border border-slate-100">
+              <span className="text-slate-500 font-medium">Total Liquidated:</span>
+              <span className="font-bold text-slate-800">{formatCurrency(totalExpended)}</span>
+            </div>
+            <div className="flex items-center justify-between sm:justify-start sm:gap-3 bg-slate-50 p-2 rounded-lg border border-slate-100">
+              <span className="font-bold text-slate-700">{summaryLabel}:</span>
+              <span
+                className={`font-extrabold ${difference < 0 ? 'text-orange-600' : difference > 0 ? 'text-blue-600' : 'text-emerald-600'}`}
+              >
+                {formatCurrency(Math.abs(difference))}
+              </span>
+            </div>
           </div>
-          <div className="flex justify-between">
-            <span className="text-slate-500">Total Liquidated</span>
-            <span className="font-semibold">{formatCurrency(totalExpended)}</span>
-          </div>
-          <div className="flex justify-between pt-1.5 border-t border-slate-200">
-            <span className="font-bold text-slate-800">{summaryLabel}</span>
-            <span
-              className={`font-bold ${difference < 0 ? 'text-orange-600' : difference > 0 ? 'text-blue-600' : 'text-emerald-600'}`}
+
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-lg transition-colors cursor-pointer"
             >
-              {formatCurrency(Math.abs(difference))}
-            </span>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-5 py-1.5 bg-[#E31837] hover:bg-[#c4122e] text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs disabled:opacity-50"
+            >
+              {isSubmitting
+                ? isEditMode
+                  ? 'Resubmitting...'
+                  : 'Submitting...'
+                : isEditMode
+                  ? 'Resubmit Liquidation'
+                  : 'Submit Liquidation'}
+            </button>
           </div>
-        </div>
-
-        <div className="flex items-center justify-end gap-2 pt-2.5 border-t border-slate-100">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-3.5 py-1.5 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-lg cursor-pointer"
-          >
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={isSubmitting}
-            className="px-4 py-1.5 bg-[#E31837] hover:bg-[#c4122e] text-white font-bold text-xs rounded-lg cursor-pointer disabled:opacity-50"
-          >
-            {isSubmitting
-              ? isEditMode
-                ? 'Resubmitting...'
-                : 'Submitting...'
-              : isEditMode
-                ? 'Resubmit Liquidation'
-                : 'Submit Liquidation'}
-          </button>
         </div>
       </form>
     </Modal>
