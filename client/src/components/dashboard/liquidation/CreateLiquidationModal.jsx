@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Image } from 'antd'
 import { Modal } from '../../ui/Modal'
 import { Plus, Trash2, Upload, X } from 'lucide-react'
+import RemoteSearchSelect from '../../ui/RemoteSearchSelect'
 
 const formatCurrency = (val) =>
   `₱${parseFloat(val || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -22,6 +23,13 @@ const emptyItem = () => ({
   receipts: [],
 })
 
+// 11 tracks — one per header cell (Date, RT#, Store, Particulars, Purpose,
+// From, To, Transport, Amount, Receipts, Action). No cell may span more
+// than one track here, or the row runs out of tracks and CSS grid wraps
+// the overflow (Action) onto an implicit second row.
+const TRAVEL_GRID_COLS = 'grid-cols-[110px_65px_1.8fr_1.6fr_1.6fr_1.3fr_1.3fr_150px_90px_2fr_45px]'
+const MISC_GRID_COLS = 'grid-cols-[110px_2.5fr_2fr_90px_2fr_45px]'
+
 export default function CreateLiquidationModal({
   isOpen,
   onClose,
@@ -34,6 +42,9 @@ export default function CreateLiquidationModal({
   districts = [],
   particulars = [],
   modes = [],
+  searchStores,
+  searchParticulars,
+  searchModes,
 }) {
   const isEditMode = Boolean(editingLiquidation)
 
@@ -41,14 +52,51 @@ export default function CreateLiquidationModal({
   const [items, setItems] = useState([emptyItem()])
   const [formError, setFormError] = useState(null)
 
-  const storeOptions = useMemo(() => {
-    const seen = new Set()
-    return districts.filter((d) => {
-      if (!d.store_name || seen.has(d.store_name)) return false
-      seen.add(d.store_name)
-      return true
-    })
-  }, [districts])
+  // Store Name options (value/label = store_name only, matches prior behavior)
+  const initialStoreOptions = useMemo(
+    () =>
+      districts.map((d) => ({
+        value: d.store_name,
+        label: d.store_number ? `${d.store_number} ${d.store_name}` : d.store_name,
+      })),
+    [districts],
+  )
+
+  // From / To options — includes store number when available
+  const initialLocationOptions = useMemo(
+    () =>
+      districts.map((d) => ({
+        value: d.store_name,
+        label: d.store_number ? `${d.store_number} ${d.store_name}` : d.store_name,
+      })),
+    [districts],
+  )
+
+  const particularOptions = useMemo(
+    () =>
+      particulars.map((p) => ({
+        value: p.id,
+        label: `${p.code ? p.code + ' ' : ''}${p.name || p.description}`,
+      })),
+    [particulars],
+  )
+
+  const modeOptions = useMemo(() => modes.map((m) => ({ value: m.id, label: m.name })), [modes])
+
+  // Fallback local filters — used only if the parent hasn't wired up the
+  // real searchParticulars/searchModes endpoints yet, so the field still
+  // works during rollout instead of throwing.
+  const searchParticularsLocal = async (term) => {
+    const lower = term.toLowerCase()
+    return particularOptions.filter((o) => o.label.toLowerCase().includes(lower))
+  }
+  const searchModesLocal = async (term) => {
+    const lower = term.toLowerCase()
+    return modeOptions.filter((o) => o.label.toLowerCase().includes(lower))
+  }
+
+  const resolvedSearchParticulars = searchParticulars || searchParticularsLocal
+  const resolvedSearchModes = searchModes || searchModesLocal
 
   useEffect(() => {
     if (!isOpen) {
@@ -287,17 +335,11 @@ export default function CreateLiquidationModal({
 
           <Image.PreviewGroup>
             <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white shadow-xs">
-              <div
-                className={
-                  isTravel ? 'min-w-[1310px] p-2 space-y-2' : 'min-w-[900px] p-2 space-y-2'
-                }
-              >
+              <div className={isTravel ? 'min-w-350 p-2 space-y-2' : 'min-w-225 p-2 space-y-2'}>
                 {/* TABLE HEADER */}
                 <div
                   className={`sticky top-0 z-10 bg-white grid gap-2 px-2 py-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100 ${
-                    isTravel
-                      ? 'grid-cols-[110px_65px_1.5fr_1.5fr_1.5fr_1.5fr_1.5fr_150px_90px_2fr_45px]'
-                      : 'grid-cols-[110px_2.5fr_2fr_90px_2fr_45px]'
+                    isTravel ? TRAVEL_GRID_COLS : MISC_GRID_COLS
                   }`}
                 >
                   {isTravel ? (
@@ -331,9 +373,7 @@ export default function CreateLiquidationModal({
                   <div
                     key={index}
                     className={`grid gap-2 items-start p-1.5 bg-slate-50/70 hover:bg-slate-100/60 rounded-lg border border-slate-200/60 transition-colors ${
-                      isTravel
-                        ? 'grid-cols-[110px_65px_1.5fr_1.5fr_1.5fr_1.5fr_1.5fr_150px_90px_2fr_45px]'
-                        : 'grid-cols-[110px_2.5fr_2fr_90px_2fr_45px]'
+                      isTravel ? TRAVEL_GRID_COLS : MISC_GRID_COLS
                     }`}
                   >
                     {/* Date Input */}
@@ -360,41 +400,31 @@ export default function CreateLiquidationModal({
                             className="w-full px-1.5 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
                           />
                         </div>
+                        {/* No col-span here — Store Name owns its own track
+                            (widened via 1.8fr above) instead of eating a
+                            second track, which is what pushed Action onto
+                            a second row. */}
                         <div>
-                          <select
-                            required
+                          <RemoteSearchSelect
                             value={it.store_name}
-                            onChange={(e) => updateItem(index, 'store_name', e.target.value)}
-                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                          >
-                            <option value="">Store...</option>
-                            {storeOptions.map((d) => (
-                              <option key={d.id} value={d.store_name}>
-                                {d.store_number ? `${d.store_number} ` : ''}
-                                {d.store_name}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(val) => updateItem(index, 'store_name', val)}
+                            fetchOptions={searchStores}
+                            initialOptions={initialStoreOptions}
+                            placeholder="Store..."
+                          />
                         </div>
                       </>
                     )}
 
-                    {/* Particulars Dropdown */}
+                    {/* Particulars */}
                     <div>
-                      <select
-                        required
+                      <RemoteSearchSelect
                         value={it.particulars}
-                        onChange={(e) => updateItem(index, 'particulars', e.target.value)}
-                        className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                      >
-                        <option value="">Select Particular...</option>
-                        {particulars.map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.code ? `${p.code} ` : ''}
-                            {p.name || p.description}
-                          </option>
-                        ))}
-                      </select>
+                        onChange={(val) => updateItem(index, 'particulars', val)}
+                        fetchOptions={resolvedSearchParticulars}
+                        initialOptions={particularOptions}
+                        placeholder="Select Particular..."
+                      />
                     </div>
 
                     {/* Purpose */}
@@ -413,53 +443,31 @@ export default function CreateLiquidationModal({
                     {isTravel && (
                       <>
                         <div>
-                          <select
-                            required
+                          <RemoteSearchSelect
                             value={it.from}
-                            onChange={(e) => updateItem(index, 'from', e.target.value)}
-                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                          >
-                            <option value="">From...</option>
-                            {storeOptions.map((d) => (
-                              <option key={d.id} value={d.store_name}>
-                                {d.store_number ? `${d.store_number} ` : ''}
-                                {d.store_name}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(val) => updateItem(index, 'from', val)}
+                            fetchOptions={searchStores}
+                            initialOptions={initialLocationOptions}
+                            placeholder="From..."
+                          />
                         </div>
                         <div>
-                          <select
-                            required
+                          <RemoteSearchSelect
                             value={it.to}
-                            onChange={(e) => updateItem(index, 'to', e.target.value)}
-                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                          >
-                            <option value="">To...</option>
-                            {storeOptions.map((d) => (
-                              <option key={d.id} value={d.store_name}>
-                                {d.store_number ? `${d.store_number} ` : ''}
-                                {d.store_name}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(val) => updateItem(index, 'to', val)}
+                            fetchOptions={searchStores}
+                            initialOptions={initialLocationOptions}
+                            placeholder="To..."
+                          />
                         </div>
                         <div>
-                          <select
-                            required
+                          <RemoteSearchSelect
                             value={it.mode_of_transportation_id}
-                            onChange={(e) =>
-                              updateItem(index, 'mode_of_transportation_id', e.target.value)
-                            }
-                            className="w-full px-1.5 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                          >
-                            <option value="">Mode...</option>
-                            {modes.map((m) => (
-                              <option key={m.id} value={m.id}>
-                                {m.name}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={(val) => updateItem(index, 'mode_of_transportation_id', val)}
+                            fetchOptions={resolvedSearchModes}
+                            initialOptions={modeOptions}
+                            placeholder="Mode..."
+                          />
                         </div>
                       </>
                     )}

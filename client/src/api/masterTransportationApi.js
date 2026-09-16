@@ -1,8 +1,8 @@
 import { apiClient } from './axios'
 
 export const masterTransportationApi = {
-  getAll: async () => {
-    const response = await apiClient.get('/master-mode-of-transportation')
+  getAll: async (params = {}) => {
+    const response = await apiClient.get('/master-mode-of-transportation', { params })
     return response.data?.data || response.data || []
   },
 

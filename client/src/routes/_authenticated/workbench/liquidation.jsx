@@ -37,7 +37,7 @@ function LiquidationPage() {
     completeLiquidation,
     markIncomplete,
   } = useLiquidations({ role: userRole })
-  const { districts, modes } = useLiquidationMasterData()
+  const { districts, modes, searchStores } = useLiquidationMasterData()
   const { particulars, getEmployeeName, getFundLabel } = useCashDisbursementLookups()
 
   // Needed only for the Verify modal's fund picker: the disbursement tied
@@ -183,6 +183,7 @@ function LiquidationPage() {
           districts={districts}
           particulars={particulars}
           modes={modes}
+          searchStores={searchStores}
         />
       )}
 

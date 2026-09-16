@@ -120,34 +120,68 @@ const upsertMasterParticulars = async (req, res) => {
 
 /**
  * @name getMasterParticulars
- * @description Get all Particulars records
+ * @description Get Particulars records. Same optional search/limit/status
+ *              query params as getMasterDistrict — see that function's
+ *              docstring. Not currently called with these params from
+ *              the frontend (the ~100-row list is small enough to load
+ *              in full today), but ready if that changes.
  */
 const getMasterParticulars = async (req, res) => {
   // #swagger.tags = ['Master Particulars']
-  // #swagger.description = 'Get all Particulars records'
+  // #swagger.description = 'Get Particulars records, optionally filtered/limited.'
+  /*
+    #swagger.parameters['search'] = { in: 'query', type: 'string', required: false }
+    #swagger.parameters['limit'] = { in: 'query', type: 'integer', required: false }
+    #swagger.parameters['status'] = { in: 'query', type: 'string', required: false }
+  */
+
+  const { search, limit, status } = req.query
+  const parsedLimit = limit ? Math.min(Math.max(parseInt(limit, 10) || 0, 1), 100) : null
 
   try {
-    const { sql, bindings } = SQL.model(Master.Particulars)
-      .select([
-        `${Master.Particulars.table}.${Master.Particulars.cols.id} AS id`,
-        `${Master.Particulars.table}.${Master.Particulars.cols.code} AS code`,
-        `${Master.Particulars.table}.${Master.Particulars.cols.name} AS name`,
-        `${Master.Particulars.table}.${Master.Particulars.cols.type} AS type`,
-        `${Master.Particulars.table}.${Master.Particulars.cols.description} AS description`,
-        `${Master.Particulars.table}.${Master.Particulars.cols.status} AS status`,
-        `${Master.Particulars.table}.${Master.Particulars.cols.createdAt} AS createdAt`,
-      ])
-      .build()
+    const conditions = []
+    const params = []
 
-    const result = await Query(sql, bindings)
+    if (status) {
+      conditions.push('mpt_status = ?')
+      params.push(status)
+    }
 
-    const data = Array.isArray(result)
-      ? Array.isArray(result[0])
-        ? result[0]
-        : result
-      : result?.data || []
+    const trimmedSearch = search ? String(search).trim() : ''
+    if (trimmedSearch) {
+      const term = `%${trimmedSearch}%`
+      conditions.push('(mpt_name LIKE ? OR mpt_code LIKE ? OR mpt_description LIKE ?)')
+      params.push(term, term, term)
+    }
 
-    return res.status(200).json(data)
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+
+    let orderClause = ''
+    if (trimmedSearch) {
+      orderClause = 'ORDER BY CASE WHEN mpt_name LIKE ? THEN 0 ELSE 1 END, mpt_name ASC'
+      params.push(`${trimmedSearch}%`)
+    }
+
+    const limitClause = parsedLimit ? 'LIMIT ?' : ''
+    const finalParams = parsedLimit ? [...params, parsedLimit] : params
+
+    const rows = await Query(
+      `SELECT
+         mpt_id AS id,
+         mpt_code AS code,
+         mpt_name AS name,
+         mpt_type AS type,
+         mpt_description AS description,
+         mpt_status AS status,
+         mpt_createdAt AS createdAt
+       FROM master_particulars
+       ${whereClause}
+       ${orderClause}
+       ${limitClause}`,
+      finalParams,
+    )
+
+    return res.status(200).json(rows)
   } catch (error) {
     console.log(error)
     return res.status(500).json({ message: 'Error retrieving Particulars records' })

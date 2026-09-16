@@ -96,28 +96,53 @@ const upsertMasterModeOfTransportation = async (req, res) => {
 
 /**
  * @name getMasterModeOfTransportation
- * @description Get all ModeOfTransportation records
+ * @description Get ModeOfTransportation records. Same optional search/
+ *              limit/status as getMasterDistrict. Not wired to the
+ *              frontend Select today (25-50 rows is fine as a plain
+ *              dropdown) but ready if needed. Response shape ({status,
+ *              data}) unchanged for backward compatibility with
+ *              masterTransportationApi.js.
  */
 const getMasterModeOfTransportation = async (req, res) => {
   // #swagger.tags = ['Master ModeOfTransportation']
-  // #swagger.description = 'Get all ModeOfTransportation records'
+  // #swagger.description = 'Get all ModeOfTransportation records, optionally filtered/limited.'
+
+  const { search, limit, status } = req.query
+  const parsedLimit = limit ? Math.min(Math.max(parseInt(limit, 10) || 0, 1), 100) : null
 
   try {
-    const { sql, bindings } = SQL.model(Master.ModeOfTransportation)
-      .select([
-        Master.ModeOfTransportation.cols.id,
-        Master.ModeOfTransportation.cols.name,
-        Master.ModeOfTransportation.cols.status,
-        Master.ModeOfTransportation.cols.createdAt,
-      ])
-      .build()
+    const conditions = []
+    const params = []
 
-    const result = await Query(sql, bindings)
+    if (status) {
+      conditions.push('mmot_status = ?')
+      params.push(status)
+    }
 
-    return res.status(200).json({
-      status: 'SUCCESS',
-      data: result,
-    })
+    const trimmedSearch = search ? String(search).trim() : ''
+    if (trimmedSearch) {
+      conditions.push('mmot_name LIKE ?')
+      params.push(`%${trimmedSearch}%`)
+    }
+
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+    const limitClause = parsedLimit ? 'LIMIT ?' : ''
+    const finalParams = parsedLimit ? [...params, parsedLimit] : params
+
+    const rows = await Query(
+      `SELECT
+         mmot_id AS id,
+         mmot_name AS name,
+         mmot_status AS status,
+         mmot_createdAt AS createdAt
+       FROM master_mode_of_transportation
+       ${whereClause}
+       ORDER BY mmot_name ASC
+       ${limitClause}`,
+      finalParams,
+    )
+
+    return res.status(200).json({ status: 'SUCCESS', data: rows })
   } catch (error) {
     console.error('getMasterModeOfTransportation error:', error)
     return res.status(500).json({ message: 'Error retrieving ModeOfTransportation records' })

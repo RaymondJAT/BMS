@@ -14,13 +14,15 @@ export const liquidationApi = {
     (await apiClient.get('/liquidation/activity', { params })).data || [],
 }
 
-// Existing master-data endpoints — routes already mounted, just wrapped here.
+// Accepts optional { search, limit, status } — see getMasterDistrict.
 export const masterDistrictApi = {
-  getAll: async () => (await apiClient.get('/master-district')).data || [],
+  getAll: async (params = {}) => (await apiClient.get('/master-district', { params })).data || [],
 }
-export const masterModeOfTransportationApi = {
-  getAll: async () => (await apiClient.get('/master-modeoftransportation')).data || [],
-}
+
+// masterModeOfTransportationApi removed — it hit the wrong path
+// ('/master-modeoftransportation', which doesn't exist). Use
+// masterTransportationApi from api/masterTransportationApi.js instead,
+// which hits the real route ('/master-mode-of-transportation').
 
 export const cashRequestEligibilityApi = {
   check: async (employeeId) =>

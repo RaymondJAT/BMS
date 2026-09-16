@@ -76,28 +76,83 @@ const upsertMasterDistrict = async (req, res) => {
 
 /**
  * @name getMasterDistrict
- * @description Get all District records
+ * @description Get District records. Supports optional server-side
+ *              search-on-type for the Liquidation form's Store field
+ *              (~4.5k rows — too many to ever load or render as a full
+ *              <select>):
+ *                - `search`: matches store_name or store_number
+ *                  (case-insensitive substring), with store names that
+ *                  START WITH the term ranked above ones that merely
+ *                  contain it.
+ *                - `limit`: caps the result count (1–50). Omitted →
+ *                  no limit, preserving the original "return everything"
+ *                  behavior for existing callers (e.g. the Districts
+ *                  admin page) that don't pass it.
+ *                - `status`: optional exact-match filter (e.g. ACTIVE),
+ *                  also opt-in — omitted keeps every status, as before.
+ *              With no query params at all, this returns exactly what it
+ *              always did.
  */
 const getMasterDistrict = async (req, res) => {
   // #swagger.tags = ['Master District']
-  // #swagger.description = 'Get all District records'
+  // #swagger.description = 'Get District records, optionally filtered/limited for search-on-type.'
+  /*
+    #swagger.parameters['search'] = { in: 'query', type: 'string', required: false, description: 'Search store_name/store_number' }
+    #swagger.parameters['limit'] = { in: 'query', type: 'integer', required: false, description: 'Max rows (1-50). Omit for no limit.' }
+    #swagger.parameters['status'] = { in: 'query', type: 'string', required: false, description: 'Exact status filter, e.g. ACTIVE' }
+  */
+
+  const { search, limit, status } = req.query
+  const parsedLimit = limit ? Math.min(Math.max(parseInt(limit, 10) || 0, 1), 50) : null
 
   try {
-    const { sql, bindings } = SQL.model(Master.District)
-      .select([
-        Master.District.cols.id,
-        Master.District.cols.store_number,
-        Master.District.cols.store_name,
-        Master.District.cols.region,
-        Master.District.cols.city_province,
-        Master.District.cols.status,
-        Master.District.cols.createdAt,
-      ])
-      .build()
+    const conditions = []
+    const params = []
 
-    const result = await Query(sql, bindings)
+    if (status) {
+      conditions.push('mdt_status = ?')
+      params.push(status)
+    }
 
-    return res.status(200).json(result)
+    const trimmedSearch = search ? String(search).trim() : ''
+    if (trimmedSearch) {
+      const term = `%${trimmedSearch}%`
+      conditions.push('(mdt_store_name LIKE ? OR mdt_store_number LIKE ?)')
+      params.push(term, term)
+    }
+
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+
+    // Only impose an explicit order when searching, so a plain
+    // no-params call stays byte-for-byte identical to the original
+    // (implicit DB order) — no surprise ordering change for existing
+    // consumers.
+    let orderClause = ''
+    if (trimmedSearch) {
+      orderClause = 'ORDER BY CASE WHEN mdt_store_name LIKE ? THEN 0 ELSE 1 END, mdt_store_name ASC'
+      params.push(`${trimmedSearch}%`)
+    }
+
+    const limitClause = parsedLimit ? 'LIMIT ?' : ''
+    const finalParams = parsedLimit ? [...params, parsedLimit] : params
+
+    const rows = await Query(
+      `SELECT
+         mdt_id AS id,
+         mdt_store_number AS store_number,
+         mdt_store_name AS store_name,
+         mdt_region AS region,
+         mdt_city_province AS city_province,
+         mdt_status AS status,
+         mdt_createdAt AS createdAt
+       FROM master_district
+       ${whereClause}
+       ${orderClause}
+       ${limitClause}`,
+      finalParams,
+    )
+
+    return res.status(200).json(rows)
   } catch (error) {
     console.error('Error in getMasterDistrict:', error)
     return res.status(500).json({ message: 'Error retrieving District records' })

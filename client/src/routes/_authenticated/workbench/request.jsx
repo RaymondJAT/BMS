@@ -68,7 +68,7 @@ function CashRequestPage() {
     disburseRequest,
   } = useCashRequests({ role: userRole, employeeId: currentEmployeeId })
 
-  const { districts, modes } = useLiquidationMasterData()
+  const { districts, modes, searchStores } = useLiquidationMasterData()
   const eligibility = useCashRequestEligibility(currentEmployeeId, requests)
 
   const {
@@ -340,6 +340,7 @@ function CashRequestPage() {
           districts={districts}
           particulars={particulars}
           modes={modes}
+          searchStores={searchStores}
         />
       )}
 
