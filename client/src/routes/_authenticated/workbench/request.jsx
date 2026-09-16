@@ -1,42 +1,26 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import DataTable from '../../../components/ui/DataTable'
 import StatCard from '../../../components/ui/StatCard'
-import {
-  Plus,
-  Search,
-  Filter,
-  FileSpreadsheet,
-  Clock,
-  CheckCircle2,
-  AlertCircle,
-  Banknote,
-  Loader2,
-  FileText,
-} from 'lucide-react'
+import { Plus, Search, Filter, FileSpreadsheet, AlertCircle, Loader2 } from 'lucide-react'
 import { createRequestColumns } from '../../../config/tables/requestColumns'
+import { buildCashRequestMetricCards } from '../../../config/cashRequestMetrics'
 import CreateCashRequestModal from '../../../components/dashboard/request/CreateCashRequestModal'
 import ViewCashRequestModal from '../../../components/dashboard/request/ViewCashRequestModal'
 import ApproveCashRequestModal from '../../../components/dashboard/request/ApproveCashRequestModal'
 import DisburseCashRequestModal from '../../../components/dashboard/request/DisburseCashRequestModal'
+import CreateLiquidationModal from '../../../components/dashboard/liquidation/CreateLiquidationModal'
+import ViewLiquidationModal from '../../../components/dashboard/liquidation/ViewLiquidationModal'
 import useCashRequests from '../../../hooks/useCashRequests'
 import { useAuth } from '../../../context/AuthContext'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
-import CreateLiquidationModal from '../../../components/dashboard/liquidation/CreateLiquidationModal'
-import ViewLiquidationModal from '../../../components/dashboard/liquidation/ViewLiquidationModal'
 import useLiquidationMasterData from '../../../hooks/useLiquidationMasterData'
-import { liquidationApi, cashRequestEligibilityApi } from '../../../api/liquidationApi'
+import { useCashRequestEligibility } from '../../../hooks/useCashRequestEligibility'
+import { useLiquidationWorkflow } from '../../../hooks/useLiquidationWorkflow'
 
 export const Route = createFileRoute('/_authenticated/workbench/request')({
   component: CashRequestPage,
 })
-
-const formatCurrency = (val) =>
-  new Intl.NumberFormat('en-PH', {
-    style: 'currency',
-    currency: 'PHP',
-    minimumFractionDigits: 2,
-  }).format(val || 0)
 
 // Roles allowed to create/edit a Cash Request. Only Administrator sees
 // the multi-status filter dropdown too — Team Leader/Fund Custodian/
@@ -85,62 +69,28 @@ function CashRequestPage() {
   } = useCashRequests({ role: userRole, employeeId: currentEmployeeId })
 
   const { districts, modes } = useLiquidationMasterData()
+  const eligibility = useCashRequestEligibility(currentEmployeeId, requests)
 
-  const [eligibility, setEligibility] = useState({ eligible: true, message: null })
-  useEffect(() => {
-    if (!currentEmployeeId) return
-    cashRequestEligibilityApi
-      .check(currentEmployeeId)
-      .then(setEligibility)
-      .catch(() => {})
-  }, [currentEmployeeId, requests])
+  const {
+    liquidateTarget,
+    isLiquidating,
+    liquidationView,
+    openLiquidate,
+    closeLiquidate,
+    createLiquidation,
+    viewLiquidation,
+    closeLiquidationView,
+  } = useLiquidationWorkflow({ onLiquidationCreated: fetchCashRequests })
 
   // ── Modal state ──────────────────────────────────────────────────
   // One object instead of 4 separate booleans/values — "what's open and
   // for which row" is a single source of truth. `modal.type` is one of:
-  // 'create' | 'edit' | 'view' | 'approve' | 'disburse' | null.
+  // 'create' | 'edit' | 'view' | 'approve' | 'disburse' | null. The
+  // Liquidate flow keeps its own state in useLiquidationWorkflow above,
+  // since it's a distinct two-step flow with its own submitting state.
   const [modal, setModal] = useState({ type: null, request: null })
   const openModal = useCallback((type, request = null) => setModal({ type, request }), [])
   const closeModal = useCallback(() => setModal({ type: null, request: null }), [])
-
-  // Liquidation has its own two-step flow (create vs. view-existing), so
-  // it keeps separate state from the main modal above, but each is still
-  // a single consolidated object rather than 3 loose useStates.
-  const [liquidateTarget, setLiquidateTarget] = useState(null)
-  const [isLiquidating, setIsLiquidating] = useState(false)
-  const [liquidationView, setLiquidationView] = useState(null) // { detail, activity } | null
-
-  const handleLiquidate = useCallback((row) => setLiquidateTarget(row), [])
-  const handleCloseLiquidate = useCallback(() => setLiquidateTarget(null), [])
-
-  const handleCreateLiquidation = useCallback(
-    async (payload) => {
-      setIsLiquidating(true)
-      try {
-        await liquidationApi.create(payload)
-        await fetchCashRequests()
-        return { success: true }
-      } catch (err) {
-        return {
-          success: false,
-          message: err.response?.data?.message || 'Failed to submit liquidation.',
-        }
-      } finally {
-        setIsLiquidating(false)
-      }
-    },
-    [fetchCashRequests],
-  )
-
-  const handleViewLiquidation = useCallback(async (row) => {
-    const [detail, activity] = await Promise.all([
-      liquidationApi.getById(row.liquidation_id),
-      liquidationApi.getActivity({ liquidation_id: row.liquidation_id }),
-    ])
-    setLiquidationView({ detail, activity: activity || [] })
-  }, [])
-
-  const handleCloseViewLiquidation = useCallback(() => setLiquidationView(null), [])
 
   const handleSelectionChange = useCallback((keys) => setSelectedIds(keys), [])
 
@@ -168,8 +118,8 @@ function CashRequestPage() {
         onEdit: (row) => openModal('edit', row),
         onApprove: (row) => openModal('approve', row),
         onComplete: (row) => openModal('disburse', row),
-        onLiquidate: handleLiquidate,
-        onViewLiquidation: handleViewLiquidation,
+        onLiquidate: openLiquidate,
+        onViewLiquidation: viewLiquidation,
         getEmployeeName,
         getDepartmentName,
         getFundLabel,
@@ -178,44 +128,15 @@ function CashRequestPage() {
       userRole,
       currentEmployeeId,
       openModal,
-      handleLiquidate,
-      handleViewLiquidation,
+      openLiquidate,
+      viewLiquidation,
       getEmployeeName,
       getDepartmentName,
       getFundLabel,
     ],
   )
 
-  const metricCards = [
-    {
-      title: 'Total Requested',
-      value: formatCurrency(metrics?.totalRequested),
-      icon: FileText,
-      subtitle: 'Excludes rejected',
-      variant: 'blue',
-    },
-    {
-      title: 'Pending Team Leader',
-      value: metrics?.pendingCount || 0,
-      icon: Clock,
-      subtitle: 'Awaiting first approval',
-      variant: 'amber',
-    },
-    {
-      title: 'Pending Fund Custodian',
-      value: formatCurrency(metrics?.approvedAmount),
-      icon: CheckCircle2,
-      subtitle: 'Team Leader approved',
-      variant: 'emerald',
-    },
-    {
-      title: 'Completed',
-      value: formatCurrency(metrics?.completedAmount),
-      icon: Banknote,
-      subtitle: 'Disbursed to date',
-      variant: 'blue',
-    },
-  ]
+  const metricCards = useMemo(() => buildCashRequestMetricCards(metrics), [metrics])
 
   return (
     <div className="w-full h-full flex-1 flex flex-col min-h-0 space-y-3 overflow-hidden">
@@ -411,8 +332,8 @@ function CashRequestPage() {
       {liquidateTarget && (
         <CreateLiquidationModal
           isOpen
-          onClose={handleCloseLiquidate}
-          onCreate={handleCreateLiquidation}
+          onClose={closeLiquidate}
+          onCreate={createLiquidation}
           isSubmitting={isLiquidating}
           cashRequest={liquidateTarget}
           cashReceived={liquidateTarget.disbursement_amount}
@@ -425,7 +346,7 @@ function CashRequestPage() {
       {liquidationView && (
         <ViewLiquidationModal
           isOpen
-          onClose={handleCloseViewLiquidation}
+          onClose={closeLiquidationView}
           liquidation={liquidationView.detail}
           activity={liquidationView.activity}
           getEmployeeName={getEmployeeName}

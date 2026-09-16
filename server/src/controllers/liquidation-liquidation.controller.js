@@ -728,7 +728,7 @@ const approveLiquidation = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
   const { id, remarks } = req.body
 
-  if (!requireRole(req, res, ['TEAM_LEAD', 'ADMIN'])) return
+  if (!requireRole(req, res, ['TEAM LEADER', 'ADMINISTRATOR'])) return
   const lq = await loadLiquidationForAction(res, id, {
     allowedStatuses: ['PENDING'],
     infinitive: 'approve',
@@ -781,7 +781,7 @@ const rejectLiquidation = async (req, res) => {
     return res
       .status(400)
       .json({ message: 'Missing required field: remarks (reason for rejection)' })
-  if (!requireRole(req, res, ['TEAM_LEAD', 'FUND_CUSTODIAN', 'ADMIN'])) return
+  if (!requireRole(req, res, ['TEAM LEADER', 'FUND CUSTODIAN', 'ADMINISTRATOR'])) return
 
   const lq = await loadLiquidationForAction(res, id, {
     allowedStatuses: ['PENDING', 'APPROVED'],
@@ -855,7 +855,7 @@ const verifyLiquidation = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
   const { id, remarks, revolving_fund_id } = req.body
 
-  if (!requireRole(req, res, ['FUND_CUSTODIAN', 'ADMIN'])) return
+  if (!requireRole(req, res, ['FUND CUSTODIAN', 'ADMINISTRATOR'])) return
   const lq = await loadLiquidationForAction(res, id, {
     allowedStatuses: ['APPROVED'],
     infinitive: 'verify',
@@ -1160,7 +1160,7 @@ const completeLiquidation = async (req, res) => {
   const userId = req.userId || req.user?.id || 1
   const { id, remarks } = req.body
 
-  if (!requireRole(req, res, ['FINANCE', 'ADMIN'])) return
+  if (!requireRole(req, res, ['FINANCE', 'ADMINISTRATOR'])) return
   const lq = await loadLiquidationForAction(res, id, {
     allowedStatuses: ['VERIFIED'],
     infinitive: 'complete',
@@ -1216,7 +1216,7 @@ const markLiquidationIncomplete = async (req, res) => {
 
   if (!remarks)
     return res.status(400).json({ message: 'Missing required field: remarks (what is incomplete)' })
-  if (!requireRole(req, res, ['FINANCE', 'ADMIN'])) return
+  if (!requireRole(req, res, ['FINANCE', 'ADMINISTRATOR'])) return
 
   const lq = await loadLiquidationForAction(res, id, {
     allowedStatuses: ['VERIFIED'],

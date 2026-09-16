@@ -113,7 +113,6 @@ export default function CreateLiquidationModal({
 
   const removeItem = (index) => {
     if (items.length <= 1) return
-    if (!window.confirm('Remove this liquidation line?')) return
     setItems((prev) => prev.filter((_, i) => i !== index))
   }
 
@@ -286,40 +285,43 @@ export default function CreateLiquidationModal({
             </button>
           </div>
 
-          {/* One PreviewGroup around the whole list so a user can click
-              any thumbnail and arrow through every receipt across every
-              line in this liquidation, not just the ones on that line. */}
           <Image.PreviewGroup>
             <div className="overflow-x-auto border border-slate-200 rounded-xl bg-white shadow-xs">
-              <div className={isTravel ? 'min-w-437.5 p-2 space-y-2' : 'min-w-225 p-2 space-y-2'}>
+              <div
+                className={
+                  isTravel ? 'min-w-[1310px] p-2 space-y-2' : 'min-w-[900px] p-2 space-y-2'
+                }
+              >
                 {/* TABLE HEADER */}
                 <div
                   className={`sticky top-0 z-10 bg-white grid gap-2 px-2 py-1.5 text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-100 ${
-                    isTravel ? 'grid-cols-[repeat(16,minmax(0,1fr))]' : 'grid-cols-12'
+                    isTravel
+                      ? 'grid-cols-[110px_65px_1.5fr_1.5fr_1.5fr_1.5fr_1.5fr_150px_90px_2fr_45px]'
+                      : 'grid-cols-[110px_2.5fr_2fr_90px_2fr_45px]'
                   }`}
                 >
                   {isTravel ? (
                     <>
-                      <div className="col-span-1">Date</div>
-                      <div className="col-span-1">RT #</div>
-                      <div className="col-span-2">Store Name</div>
-                      <div className="col-span-2">Particulars</div>
-                      <div className="col-span-2">Purpose</div>
-                      <div className="col-span-1">From</div>
-                      <div className="col-span-1">To</div>
-                      <div className="col-span-2">Transport</div>
-                      <div className="col-span-1">Amount</div>
-                      <div className="col-span-2">Receipts</div>
-                      <div className="col-span-1 text-right pr-2">Action</div>
+                      <div>Date</div>
+                      <div>RT #</div>
+                      <div>Store Name</div>
+                      <div>Particulars</div>
+                      <div>Purpose</div>
+                      <div>From</div>
+                      <div>To</div>
+                      <div>Transport</div>
+                      <div>Amount</div>
+                      <div>Receipts</div>
+                      <div className="text-center">Action</div>
                     </>
                   ) : (
                     <>
-                      <div className="col-span-2">Date</div>
-                      <div className="col-span-2">Particulars</div>
-                      <div className="col-span-3">Purpose</div>
-                      <div className="col-span-2">Amount</div>
-                      <div className="col-span-2">Receipts</div>
-                      <div className="col-span-1 text-right pr-2">Action</div>
+                      <div>Date</div>
+                      <div>Particulars</div>
+                      <div>Purpose</div>
+                      <div>Amount</div>
+                      <div>Receipts</div>
+                      <div className="text-center">Action</div>
                     </>
                   )}
                 </div>
@@ -329,11 +331,13 @@ export default function CreateLiquidationModal({
                   <div
                     key={index}
                     className={`grid gap-2 items-start p-1.5 bg-slate-50/70 hover:bg-slate-100/60 rounded-lg border border-slate-200/60 transition-colors ${
-                      isTravel ? 'grid-cols-[repeat(16,minmax(0,1fr))]' : 'grid-cols-12'
+                      isTravel
+                        ? 'grid-cols-[110px_65px_1.5fr_1.5fr_1.5fr_1.5fr_1.5fr_150px_90px_2fr_45px]'
+                        : 'grid-cols-[110px_2.5fr_2fr_90px_2fr_45px]'
                     }`}
                   >
                     {/* Date Input */}
-                    <div className={isTravel ? 'col-span-1' : 'col-span-2'}>
+                    <div>
                       <input
                         type="date"
                         required
@@ -346,17 +350,17 @@ export default function CreateLiquidationModal({
                     {/* Travel Fields */}
                     {isTravel && (
                       <>
-                        <div className="col-span-1">
+                        <div>
                           <input
                             type="text"
                             placeholder="RT#"
                             required
                             value={it.rt}
                             onChange={(e) => updateItem(index, 'rt', e.target.value)}
-                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                            className="w-full px-1.5 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
                           />
                         </div>
-                        <div className="col-span-2">
+                        <div>
                           <select
                             required
                             value={it.store_name}
@@ -366,6 +370,7 @@ export default function CreateLiquidationModal({
                             <option value="">Store...</option>
                             {storeOptions.map((d) => (
                               <option key={d.id} value={d.store_name}>
+                                {d.store_number ? `${d.store_number} ` : ''}
                                 {d.store_name}
                               </option>
                             ))}
@@ -375,7 +380,7 @@ export default function CreateLiquidationModal({
                     )}
 
                     {/* Particulars Dropdown */}
-                    <div className="col-span-2">
+                    <div>
                       <select
                         required
                         value={it.particulars}
@@ -385,6 +390,7 @@ export default function CreateLiquidationModal({
                         <option value="">Select Particular...</option>
                         {particulars.map((p) => (
                           <option key={p.id} value={p.id}>
+                            {p.code ? `${p.code} ` : ''}
                             {p.name || p.description}
                           </option>
                         ))}
@@ -392,7 +398,7 @@ export default function CreateLiquidationModal({
                     </div>
 
                     {/* Purpose */}
-                    <div className={isTravel ? 'col-span-2' : 'col-span-3'}>
+                    <div>
                       <input
                         type="text"
                         placeholder="What was this for?"
@@ -406,34 +412,46 @@ export default function CreateLiquidationModal({
                     {/* Travel-only Location and Transport Inputs */}
                     {isTravel && (
                       <>
-                        <div className="col-span-1">
-                          <input
-                            type="text"
-                            placeholder="From"
+                        <div>
+                          <select
                             required
                             value={it.from}
                             onChange={(e) => updateItem(index, 'from', e.target.value)}
                             className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                          />
+                          >
+                            <option value="">From...</option>
+                            {storeOptions.map((d) => (
+                              <option key={d.id} value={d.store_name}>
+                                {d.store_number ? `${d.store_number} ` : ''}
+                                {d.store_name}
+                              </option>
+                            ))}
+                          </select>
                         </div>
-                        <div className="col-span-1">
-                          <input
-                            type="text"
-                            placeholder="To"
+                        <div>
+                          <select
                             required
                             value={it.to}
                             onChange={(e) => updateItem(index, 'to', e.target.value)}
                             className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
-                          />
+                          >
+                            <option value="">To...</option>
+                            {storeOptions.map((d) => (
+                              <option key={d.id} value={d.store_name}>
+                                {d.store_number ? `${d.store_number} ` : ''}
+                                {d.store_name}
+                              </option>
+                            ))}
+                          </select>
                         </div>
-                        <div className="col-span-2">
+                        <div>
                           <select
                             required
                             value={it.mode_of_transportation_id}
                             onChange={(e) =>
                               updateItem(index, 'mode_of_transportation_id', e.target.value)
                             }
-                            className="w-full px-2 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
+                            className="w-full px-1.5 py-1 bg-white border border-slate-200 rounded-md text-xs font-medium focus:ring-1 focus:ring-[#E31837]"
                           >
                             <option value="">Mode...</option>
                             {modes.map((m) => (
@@ -447,7 +465,7 @@ export default function CreateLiquidationModal({
                     )}
 
                     {/* Amount Field */}
-                    <div className={isTravel ? 'col-span-1' : 'col-span-2'}>
+                    <div>
                       <div className="relative">
                         <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">
                           ₱
@@ -465,17 +483,14 @@ export default function CreateLiquidationModal({
                       </div>
                     </div>
 
-                    {/* Receipt Upload & Previews — flex-wrap instead of a
-                        horizontal scrollbar, so thumbnails flow onto a
-                        second line using the row's own width. */}
-                    <div className={isTravel ? 'col-span-2' : 'col-span-2'}>
-                      <div className="flex items-center gap-1.5 flex-wrap py-0.5">
+                    {/* Receipt Upload & Previews */}
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap py-0.5 max-w-full">
                         <label
                           className="inline-flex items-center justify-center h-7 px-2 gap-1 bg-white border border-slate-300 hover:border-slate-400 rounded-md cursor-pointer shrink-0 text-[11px] text-slate-600 font-medium"
                           title="Upload receipt(s) for this line"
                         >
                           <Upload className="w-3.5 h-3.5 text-slate-500" />
-                          <span>Upload</span>
                           <input
                             type="file"
                             multiple
@@ -516,7 +531,7 @@ export default function CreateLiquidationModal({
                     </div>
 
                     {/* Remove Button */}
-                    <div className="col-span-1 flex justify-end">
+                    <div className="flex justify-center items-center h-full">
                       {items.length > 1 && (
                         <button
                           type="button"

@@ -3,7 +3,7 @@ import {
   Pencil,
   CheckCircle2,
   Banknote,
-  Receipt,
+  ReceiptText, // Replaced Receipt with ReceiptText (no dollar sign)
   User,
   Building,
   Calendar,
@@ -31,43 +31,8 @@ const STATUS_STYLES = {
   REJECTED: 'bg-rose-50 text-rose-700 border-rose-200',
 }
 
-// PENDING here means "pending Team Leader" and APPROVED means "Team-Lead-
-// approved, pending Fund Custodian" — matching the actual cr_status ENUM
-// (no separate PENDING_TL/PENDING_FC statuses exist on the backend).
 const EDITABLE_STATUSES = ['PENDING', 'REJECTED']
 
-/**
- * Column/action set for the Cash Request table. Field names match the
- * backend's actual getCashRequest response shape: id, reference_id,
- * cv_number, purpose, project, amount, revolving_fund_id, employee_id,
- * department_id, team_lead, request_date, status, createdAt.
- *
- * Role model (matches master_access.ma_name / AuthContext's
- * user.access_name exactly):
- *   - REQUESTER:      can create/edit their own PENDING or REJECTED
- *                      requests. No approval actions.
- *   - TEAM_LEAD:      first-stage approval — approve/reject a PENDING
- *                      request (see ApproveCashRequestModal). Does not
- *                      select a Revolving Fund.
- *   - FUND_CUSTODIAN: final-stage approval — completes an APPROVED
- *                      request by selecting the Revolving Fund to
- *                      disburse from (see DisburseCashRequestModal).
- *   - FINANCE:        view-only. No edit, no approve, no complete, no
- *                      liquidate.
- *   - ADMINISTRATOR:  full access to every action, matching
- *                      AuthContext.jsx's PROTECTED_ACCESS_NAMES /
- *                      canAccessRoute short-circuit.
- *
- * IMPORTANT: an unresolved/loading role (userRole undefined/null) must
- * NEVER be treated as full access — that was the previous behavior via
- * `!userRole` and is a real permission leak. While the role hasn't
- * loaded yet, every gated action stays hidden; only Administrator (an
- * explicit, exact match) unlocks everything.
- *
- * These client-side checks are a UX convenience only — the backend's
- * requireRole() in cash-request.controller.js and the status guards in
- * updateCashRequest/completeCashRequest are the real enforcement points.
- */
 export function createRequestColumns({
   userRole,
   currentEmployeeId,
@@ -86,8 +51,6 @@ export function createRequestColumns({
   const canApprove = isAdministrator || userRole === 'TEAM LEADER'
   const canComplete = isAdministrator || userRole === 'FUND CUSTODIAN'
   const canActAsRequester = isAdministrator || userRole === 'REQUESTER'
-  // FINANCE (and any other/unresolved role) falls through to view-only —
-  // no explicit flag needed since every action below is gated positively.
 
   const resolveEmployee = (row) => {
     if (typeof getEmployeeName === 'function') {
@@ -228,9 +191,6 @@ export function createRequestColumns({
           isAdministrator ||
           (canActAsRequester && String(row.employee_id) === String(currentEmployeeId))
         const canEdit = ownsRequest && EDITABLE_STATUSES.includes(status)
-        // Liquidate only once COMPLETED and no liquidation exists yet for
-        // this request (row.liquidation_id comes from getCashRequest's
-        // LEFT JOIN — see backend patch).
         const canLiquidate = ownsRequest && status === 'COMPLETED' && !row.liquidation_id
         const hasLiquidation = Boolean(row.liquidation_id)
 
@@ -296,7 +256,7 @@ export function createRequestColumns({
                 title="Liquidate this Cash Request"
                 className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
               >
-                <Receipt className="w-4 h-4" />
+                <ReceiptText className="w-4 h-4" />
               </button>
             )}
             {hasLiquidation && (
@@ -309,7 +269,7 @@ export function createRequestColumns({
                 title={`View Liquidation (${row.liquidation_status})`}
                 className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
               >
-                <Receipt className="w-4 h-4" />
+                <ReceiptText className="w-4 h-4" />
               </button>
             )}
           </div>

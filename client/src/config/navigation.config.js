@@ -104,12 +104,12 @@ export const NAVIGATION_ITEMS = [
         to: '/funds/disbursements',
         permissionKey: 'disbursements',
       },
-      {
-        id: 'fund-history',
-        title: 'Audit History',
-        to: '/funds/audit-history',
-        permissionKey: 'audit-history',
-      },
+      // {
+      //   id: 'fund-history',
+      //   title: 'Audit History',
+      //   to: '/funds/audit-history',
+      //   permissionKey: 'audit-history',
+      // },
     ],
   },
   {
