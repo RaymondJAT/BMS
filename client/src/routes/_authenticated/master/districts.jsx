@@ -16,7 +16,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import { createDistrictsColumns } from '../../../config/tables/disctrictColumns'
+import { createDistrictsColumns } from '../../../table-columns/disctrictColumns'
 import { useDistricts } from '../../../hooks/useDistricts'
 
 export const Route = createFileRoute('/_authenticated/master/districts')({

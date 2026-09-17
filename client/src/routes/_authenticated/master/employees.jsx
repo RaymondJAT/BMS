@@ -12,7 +12,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import { createEmployeeColumns } from '../../../config/tables/employeeColumns'
+import { createEmployeeColumns } from '../../../table-columns/employeeColumns'
 import { useEmployeeLookups } from '../../../hooks/useEmployeeLookups'
 
 export const Route = createFileRoute('/_authenticated/master/employees')({

@@ -6,7 +6,7 @@ import DataTable from '../../../components/ui/DataTable'
 import { useLiquidationMasterData } from '../../../hooks/useLiquidationMasterData'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
 import { useLiquidationDetail } from '../../../hooks/useLiquidationDetail'
-import { createLiquidationItemColumns } from '../../../config/tables/liquidationItemColumns'
+import { createLiquidationItemColumns } from '../../../table-columns/liquidationItemColumns'
 import { resolveTeamLeader } from '../../../utils/resolveTeamLeader'
 
 export const Route = createFileRoute('/_authenticated/workbench/liquidationDetail')({

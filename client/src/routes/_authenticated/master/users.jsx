@@ -12,7 +12,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import { createUserColumns } from '../../../config/tables/userColumns'
+import { createUserColumns } from '../../../table-columns/userColumns'
 import { useUserManagementLookups } from '../../../hooks/useUserManagementLookups'
 import { masterUserApi } from '../../../api/masterUserApi'
 import AccessAssignmentModal from '../../../features/users/AccessAssignmentModal'

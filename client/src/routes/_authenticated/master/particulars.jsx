@@ -16,7 +16,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import { createParticularsColumns } from '../../../config/tables/particularsColumns'
+import { createParticularsColumns } from '../../../table-columns/particularsColumns'
 import { useParticulars } from '../../../hooks/useParticulars'
 
 export const Route = createFileRoute('/_authenticated/master/particulars')({

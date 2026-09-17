@@ -12,7 +12,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import { createRouteColumns } from '../../../config/tables/routeColumns'
+import { createRouteColumns } from '../../../table-columns/routeColumns'
 import EditRouteAccessModal from '../../../features/route-access/EditRouteAccessModal'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
 import { routeAccessApi } from '../../../api/routeAccessApi'

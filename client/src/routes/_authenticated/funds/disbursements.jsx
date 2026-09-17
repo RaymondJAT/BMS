@@ -13,7 +13,7 @@ import {
   RotateCcw,
   Loader2,
 } from 'lucide-react'
-import { createDisbursementColumns } from '../../../config/tables/disbursementColumns'
+import { createDisbursementColumns } from '../../../table-columns/disbursementColumns'
 import CreateCashDisbursementModal from '../../../features/disbursement/CreateCashDisbursementModal'
 import EditCashDisbursementModal from '../../../features/disbursement/EditCashDisbursementModal'
 import SubmitCashDisbursementModal from '../../../features/disbursement/SubmitCashDisbursementModal'

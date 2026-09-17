@@ -130,12 +130,12 @@ export const NAVIGATION_ITEMS = [
         to: '/workbench/liquidation',
         permissionKey: 'liquidations',
       },
-      {
-        id: 'wb-approvals',
-        title: 'Approvals & Reviews',
-        to: '/workbench/approvals',
-        permissionKey: 'approvals',
-      },
+      // {
+      //   id: 'wb-approvals',
+      //   title: 'Approvals & Reviews',
+      //   to: '/workbench/approvals',
+      //   permissionKey: 'approvals',
+      // },
     ],
   },
   {

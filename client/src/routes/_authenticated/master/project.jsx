@@ -13,7 +13,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import { createProjectColumns } from '../../../config/tables/projectColumns'
+import { createProjectColumns } from '../../../table-columns/projectColumns'
 import { useProjects } from '../../../hooks/useProjects'
 
 export const Route = createFileRoute('/_authenticated/master/project')({

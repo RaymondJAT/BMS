@@ -3,7 +3,7 @@ import { useState } from 'react'
 import DataTable from '../../../components/ui/DataTable'
 import { Plus, Search, Loader2 } from 'lucide-react'
 
-import { createBudgetColumns } from '../../../config/tables/budgetColumns'
+import { createBudgetColumns } from '../../../table-columns/budgetColumns'
 import BudgetFormModal from '../../../features/budget/BudgetFormModal'
 import BudgetHistoryModal from '../../../features/budget/BudgetHistoryModal'
 

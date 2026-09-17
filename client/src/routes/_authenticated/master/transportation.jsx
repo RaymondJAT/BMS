@@ -14,7 +14,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import { createTransportationColumns } from '../../../config/tables/transportationColumns'
+import { createTransportationColumns } from '../../../table-columns/transportationColumns'
 import { useTransportation } from '../../../hooks/useTransportation'
 
 export const Route = createFileRoute('/_authenticated/master/transportation')({

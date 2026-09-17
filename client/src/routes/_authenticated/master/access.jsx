@@ -13,7 +13,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import { createAccessColumns } from '../../../config/tables/accessColumns'
+import { createAccessColumns } from '../../../table-columns/accessColumns'
 import EditAccessModal from '../../../features/access/EditAccessModal'
 import EditPermissionModal from '../../../features/access/EditPermissionModal'
 import { useAccessLookups } from '../../../hooks/useAccessLookups'

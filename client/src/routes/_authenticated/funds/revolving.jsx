@@ -14,7 +14,7 @@ import {
   CheckCircle2,
   Loader2,
 } from 'lucide-react'
-import { createRevolvingColumns } from '../../../config/tables/revolvingColumns'
+import { createRevolvingColumns } from '../../../table-columns/revolvingColumns'
 import CreateRevolvingFundModal from '../../../features/revolving/CreateRevolvingFundModal'
 import ViewRevolvingFundModal from '../../../features/revolving/ViewRevolvingFundModal'
 import EditRevolvingFundModal from '../../../features/revolving/EditRevolvingFundModal'

@@ -12,7 +12,7 @@ import {
   Loader2,
   AlertCircle,
 } from 'lucide-react'
-import { createDepartmentColumns } from '../../../config/tables/departmentColumns'
+import { createDepartmentColumns } from '../../../table-columns/departmentColumns'
 import EditDepartmentModal from '../../../features/department/EditDepartmentModal'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
 
