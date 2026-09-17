@@ -16,7 +16,7 @@ import {
 import { createAccessColumns } from '../../../config/tables/accessColumns'
 import EditAccessModal from '../../../components/dashboard/access/EditAccessModal'
 import EditPermissionModal from '../../../components/dashboard/access/EditPermissionModal'
-import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
+import { useAccessLookups } from '../../../hooks/useAccessLookups'
 import { masterAccessApi } from '../../../api/masterAccessApi'
 
 export const Route = createFileRoute('/_authenticated/master/access')({
@@ -38,7 +38,7 @@ function AccessPage() {
   const [isPermissionModalOpen, setIsPermissionModalOpen] = useState(false)
 
   // Load access list from lookup hook
-  const { accessRoles = [], isLoading, error, refetch } = useCashDisbursementLookups()
+  const { accessRoles = [], isLoading, error, refetch } = useAccessLookups()
 
   const handleCreate = useCallback(() => {
     setSelectedAccess(null)

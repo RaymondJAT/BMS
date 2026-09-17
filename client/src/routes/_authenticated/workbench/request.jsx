@@ -13,7 +13,7 @@ import CreateLiquidationModal from '../../../components/dashboard/liquidation/Cr
 import ViewLiquidationModal from '../../../components/dashboard/liquidation/ViewLiquidationModal'
 import useCashRequests from '../../../hooks/useCashRequests'
 import { useAuth } from '../../../context/AuthContext'
-import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
+import { useCashRequestLookups } from '../../../hooks/useCashRequestLookups'
 import useLiquidationMasterData from '../../../hooks/useLiquidationMasterData'
 import { useCashRequestEligibility } from '../../../hooks/useCashRequestEligibility'
 import { useLiquidationWorkflow } from '../../../hooks/useLiquidationWorkflow'
@@ -52,7 +52,7 @@ function CashRequestPage() {
     getDepartmentName,
     getEmployeeName,
     getFundLabel,
-  } = useCashDisbursementLookups()
+  } = useCashRequestLookups()
 
   const {
     requests = [],

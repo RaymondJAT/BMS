@@ -13,7 +13,7 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { createEmployeeColumns } from '../../../config/tables/employeeColumns'
-import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
+import { useEmployeeLookups } from '../../../hooks/useEmployeeLookups'
 
 export const Route = createFileRoute('/_authenticated/master/employees')({
   component: EmployeesPage,
@@ -30,7 +30,7 @@ export default function EmployeesPage() {
   // department_name / position_name already come pre-joined on each
   // employee row (see master-employee.controller.js getMasterEmployee) —
   // no separate department/position lookup maps are needed here.
-  const { employees = [], isLoading, error } = useCashDisbursementLookups()
+  const { employees = [], isLoading, error } = useEmployeeLookups()
 
   const handleEdit = useCallback((row) => {
     setSelectedEmployee(row)

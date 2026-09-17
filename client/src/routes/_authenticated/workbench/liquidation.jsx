@@ -10,7 +10,7 @@ import FinanceReviewModal from '../../../components/dashboard/liquidation/Financ
 import useLiquidations from '../../../hooks/useLiquidations'
 import useLiquidationMasterData from '../../../hooks/useLiquidationMasterData'
 import { useAuth } from '../../../context/AuthContext'
-import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
+import { useLiquidationLookups } from '../../../hooks/useLiquidationLookups'
 import { useCashDisbursements } from '../../../hooks/useCashDisbursements'
 import useRevolvingFunds from '../../../hooks/useRevolvingFunds'
 import { liquidationApi } from '../../../api/liquidationApi'
@@ -38,7 +38,7 @@ function LiquidationPage() {
     markIncomplete,
   } = useLiquidations({ role: userRole })
   const { districts, modes, searchStores } = useLiquidationMasterData()
-  const { particulars, getEmployeeName, getFundLabel } = useCashDisbursementLookups()
+  const { particulars, getEmployeeName, getFundLabel } = useLiquidationLookups()
 
   // Needed only for the Verify modal's fund picker: the disbursement tied
   // to the liquidation (to find its ORIGINAL fund + that fund's status)

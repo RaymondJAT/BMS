@@ -3,25 +3,29 @@ import { revolvingFundApi } from '../api/revolvingFundApi'
 import { budgetApi } from '../api/budgetApi'
 import { masterDepartmentApi } from '../api/masterDepartmentApi'
 import { masterEmployeeApi } from '../api/masterEmployeeApi'
+import { masterParticularsApi } from '../api/masterParticularsApi'
 
 /**
- * Cash Disbursement page's lookup hook. Trimmed from the original
- * shared version to only what the Disbursements list + Create/Edit/
- * Submit modals actually read: revolvingFunds, budgets (needed
- * internally by getFundLabel — the page never touches `budgets`
- * itself), departments, and employees.
+ * Liquidation page's lookup hook. Scoped to what the Liquidation list +
+ * Edit/Approve/Verify/Finance modals actually read from the old shared
+ * hook: particulars (each liquidation line's Particulars dropdown),
+ * employees + getEmployeeName, and revolvingFunds + budgets +
+ * departments purely so getFundLabel can resolve a disbursement's
+ * originating fund to a display name.
  *
- * particulars/users/accessRoles/routeAccess/projects were fetched here
- * before but had no consumer on this page — they now live in
- * useCashRequestLookups / useLiquidationLookups / useAccessLookups,
- * scoped to the routes that actually read them. Same fetch pattern
- * (Promise.allSettled + unwrap) as before, just fewer calls.
+ * Deliberately does NOT duplicate what the page already fetches via its
+ * own dedicated hooks, left untouched: useLiquidationMasterData
+ * (districts/modes/searchStores — Store/Transport fields on each line),
+ * useCashDisbursements (disbursement rows, for the Verify modal's fund
+ * picker), and useRevolvingFunds (full fund list with status, same
+ * picker).
  */
-export function useCashDisbursementLookups() {
+export function useLiquidationLookups() {
   const [revolvingFunds, setRevolvingFunds] = useState([])
   const [budgets, setBudgets] = useState([])
   const [departments, setDepartments] = useState([])
   const [employees, setEmployees] = useState([])
+  const [particulars, setParticulars] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -29,11 +33,12 @@ export function useCashDisbursementLookups() {
     setIsLoading(true)
     setError(null)
     try {
-      const [rfRes, budgetRes, deptRes, empRes] = await Promise.allSettled([
+      const [rfRes, budgetRes, deptRes, empRes, partRes] = await Promise.allSettled([
         revolvingFundApi.getAll(),
         budgetApi.getAll(),
         masterDepartmentApi.getAll(),
         masterEmployeeApi.getAll(),
+        masterParticularsApi.getAll(),
       ])
 
       const unwrap = (res) => {
@@ -46,8 +51,9 @@ export function useCashDisbursementLookups() {
       setBudgets(unwrap(budgetRes))
       setDepartments(unwrap(deptRes))
       setEmployees(unwrap(empRes))
+      setParticulars(unwrap(partRes))
     } catch (err) {
-      console.error('Failed to fetch cash disbursement lookups:', err)
+      console.error('Failed to fetch liquidation lookups:', err)
       setError('Failed to load reference data.')
     } finally {
       setIsLoading(false)
@@ -95,6 +101,7 @@ export function useCashDisbursementLookups() {
     budgets,
     departments,
     employees,
+    particulars,
     isLoading,
     error,
     refetch: fetchAll,
@@ -104,4 +111,4 @@ export function useCashDisbursementLookups() {
   }
 }
 
-export default useCashDisbursementLookups
+export default useLiquidationLookups
