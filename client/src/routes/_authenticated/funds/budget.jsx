@@ -4,8 +4,8 @@ import DataTable from '../../../components/ui/DataTable'
 import { Plus, Search, Loader2 } from 'lucide-react'
 
 import { createBudgetColumns } from '../../../config/tables/budgetColumns'
-import BudgetFormModal from '../../../components/dashboard/budget/BudgetFormModal'
-import BudgetHistoryModal from '../../../components/dashboard/budget/BudgetHistoryModal'
+import BudgetFormModal from '../../../features/budget/BudgetFormModal'
+import BudgetHistoryModal from '../../../features/budget/BudgetHistoryModal'
 
 import useBudgets from '../../../hooks/useBudgets'
 import useBudgetForm from '../../../hooks/useBudgetForm'

@@ -14,9 +14,9 @@ import {
   Loader2,
 } from 'lucide-react'
 import { createDisbursementColumns } from '../../../config/tables/disbursementColumns'
-import CreateCashDisbursementModal from '../../../components/dashboard/disbursement/CreateCashDisbursementModal'
-import EditCashDisbursementModal from '../../../components/dashboard/disbursement/EditCashDisbursementModal'
-import SubmitCashDisbursementModal from '../../../components/dashboard/disbursement/SubmitCashDisbursementModal'
+import CreateCashDisbursementModal from '../../../features/disbursement/CreateCashDisbursementModal'
+import EditCashDisbursementModal from '../../../features/disbursement/EditCashDisbursementModal'
+import SubmitCashDisbursementModal from '../../../features/disbursement/SubmitCashDisbursementModal'
 import { useCashDisbursements } from '../../../hooks/useCashDisbursements'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
 

@@ -4,7 +4,7 @@ import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import DataTable from '../../../components/ui/DataTable'
 import StatCard from '../../../components/ui/StatCard'
-import EditParticularsModal from '../../../components/dashboard/particulars/EditParticularsModal'
+import EditParticularsModal from '../../../features/particulars/EditParticularsModal'
 import {
   Search,
   Filter,

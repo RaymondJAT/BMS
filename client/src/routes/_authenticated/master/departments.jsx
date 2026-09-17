@@ -13,7 +13,7 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { createDepartmentColumns } from '../../../config/tables/departmentColumns'
-import EditDepartmentModal from '../../../components/dashboard/department/EditDepartmentModal'
+import EditDepartmentModal from '../../../features/department/EditDepartmentModal'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
 
 export const Route = createFileRoute('/_authenticated/master/departments')({

@@ -15,7 +15,7 @@ import {
 import { createUserColumns } from '../../../config/tables/userColumns'
 import { useUserManagementLookups } from '../../../hooks/useUserManagementLookups'
 import { masterUserApi } from '../../../api/masterUserApi'
-import AccessAssignmentModal from '../../../components/dashboard/users/AccessAssignmentModal'
+import AccessAssignmentModal from '../../../features/users/AccessAssignmentModal'
 
 export const Route = createFileRoute('/_authenticated/master/users')({
   component: UsersPage,

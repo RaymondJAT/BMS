@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useState, useMemo, useCallback } from 'react'
 import DataTable from '../../../components/ui/DataTable'
 import StatCard from '../../../components/ui/StatCard'
-import ProjectModal from '../../../components/dashboard/project/ProjectModal'
+import ProjectModal from '../../../features/project/ProjectModal'
 import {
   Search,
   Filter,

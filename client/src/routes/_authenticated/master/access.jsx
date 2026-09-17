@@ -14,8 +14,8 @@ import {
   AlertCircle,
 } from 'lucide-react'
 import { createAccessColumns } from '../../../config/tables/accessColumns'
-import EditAccessModal from '../../../components/dashboard/access/EditAccessModal'
-import EditPermissionModal from '../../../components/dashboard/access/EditPermissionModal'
+import EditAccessModal from '../../../features/access/EditAccessModal'
+import EditPermissionModal from '../../../features/access/EditPermissionModal'
 import { useAccessLookups } from '../../../hooks/useAccessLookups'
 import { masterAccessApi } from '../../../api/masterAccessApi'
 

@@ -15,10 +15,10 @@ import {
   Loader2,
 } from 'lucide-react'
 import { createRevolvingColumns } from '../../../config/tables/revolvingColumns'
-import CreateRevolvingFundModal from '../../../components/dashboard/revolving/CreateRevolvingFundModal'
-import ViewRevolvingFundModal from '../../../components/dashboard/revolving/ViewRevolvingFundModal'
-import EditRevolvingFundModal from '../../../components/dashboard/revolving/EditRevolvingFundModal'
-import SubmitRevolvingFundModal from '../../../components/dashboard/revolving/SubmitRevolvingFundModal'
+import CreateRevolvingFundModal from '../../../features/revolving/CreateRevolvingFundModal'
+import ViewRevolvingFundModal from '../../../features/revolving/ViewRevolvingFundModal'
+import EditRevolvingFundModal from '../../../features/revolving/EditRevolvingFundModal'
+import SubmitRevolvingFundModal from '../../../features/revolving/SubmitRevolvingFundModal'
 
 import useRevolvingFunds from '../../../hooks/useRevolvingFunds'
 import useRevolvingFundForm from '../../../hooks/useRevolvingFundForm'
