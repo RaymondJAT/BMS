@@ -1,4 +1,4 @@
-import { Eye, Pencil, CheckCircle2, ShieldCheck, ClipboardCheck } from 'lucide-react'
+import { Download, Pencil, CheckCircle2, ShieldCheck, ClipboardCheck } from 'lucide-react'
 
 const formatCurrency = (val) =>
   `₱${parseFloat(val || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -16,7 +16,7 @@ const EDITABLE_STATUSES = ['PENDING', 'REJECTED', 'INCOMPLETE']
 export function createLiquidationColumns({
   userRole,
   currentEmployeeId,
-  onView,
+  onDownload,
   onEdit,
   onApprove,
   onVerify,
@@ -99,19 +99,23 @@ export function createLiquidationColumns({
           hasFullAccess ||
           (canActAsRequester && String(row.employee_id) === String(currentEmployeeId))
         const canEdit = ownsRequest && EDITABLE_STATUSES.includes(status)
+
         return (
           <div className="flex items-center justify-center gap-1">
+            {/* Download Liquidation PDF/Summary */}
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation()
-                onView?.(row)
+                onDownload?.(row)
               }}
-              title="View"
-              className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg cursor-pointer"
+              title="Download Liquidation PDF"
+              className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
             >
-              <Eye className="w-4 h-4" />
+              <Download className="w-4 h-4" />
             </button>
+
+            {/* Edit & Resubmit */}
             {canEdit && (
               <button
                 type="button"
@@ -125,6 +129,8 @@ export function createLiquidationColumns({
                 <Pencil className="w-4 h-4" />
               </button>
             )}
+
+            {/* Team Lead Approve */}
             {canApprove && status === 'PENDING' && (
               <button
                 type="button"
@@ -138,6 +144,8 @@ export function createLiquidationColumns({
                 <CheckCircle2 className="w-4 h-4" />
               </button>
             )}
+
+            {/* Fund Custodian Verify */}
             {canVerify && status === 'APPROVED' && (
               <button
                 type="button"
@@ -151,6 +159,8 @@ export function createLiquidationColumns({
                 <ShieldCheck className="w-4 h-4" />
               </button>
             )}
+
+            {/* Finance Review */}
             {canFinance && status === 'VERIFIED' && (
               <button
                 type="button"
