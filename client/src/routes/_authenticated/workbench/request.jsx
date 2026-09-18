@@ -52,6 +52,7 @@ function CashRequestPage() {
     getDepartmentName,
     getEmployeeName,
     getFundLabel,
+    searchParticulars,
   } = useCashRequestLookups()
 
   const {
@@ -68,7 +69,7 @@ function CashRequestPage() {
     disburseRequest,
   } = useCashRequests({ role: userRole, employeeId: currentEmployeeId })
 
-  const { districts, modes, searchStores } = useLiquidationMasterData()
+  const { districts, modes, searchStores, searchModes } = useLiquidationMasterData()
   const eligibility = useCashRequestEligibility(currentEmployeeId, requests)
 
   const {
@@ -341,6 +342,8 @@ function CashRequestPage() {
           particulars={particulars}
           modes={modes}
           searchStores={searchStores}
+          searchParticulars={searchParticulars}
+          searchModes={searchModes}
         />
       )}
 

@@ -155,7 +155,7 @@ export default function EditCashDisbursementModal({
               <option value="">Select Employee...</option>
               {employees.map((emp) => (
                 <option key={emp.id} value={emp.id}>
-                  {emp.fullname || emp.name || emp.full_name || `Employee #${emp.id}`}
+                  {emp.fullname || emp.name || emp.full_name || `${emp.id}`}
                 </option>
               ))}
             </select>

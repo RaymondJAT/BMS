@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 
 export const Modal = ({
   isOpen,
@@ -9,6 +9,21 @@ export const Modal = ({
   maxWidth = 'max-w-lg',
   fullScreen = false,
 }) => {
+  const [shouldRender, setShouldRender] = useState(false)
+  const [animateIn, setAnimateIn] = useState(false)
+
+  useEffect(() => {
+    if (isOpen) {
+      setShouldRender(true)
+      const timer = setTimeout(() => setAnimateIn(true), 10)
+      return () => clearTimeout(timer)
+    } else {
+      setAnimateIn(false)
+      const timer = setTimeout(() => setShouldRender(false), 200)
+      return () => clearTimeout(timer)
+    }
+  }, [isOpen])
+
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === 'Escape') onClose()
@@ -17,11 +32,15 @@ export const Modal = ({
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [isOpen, onClose])
 
-  if (!isOpen) return null
+  if (!shouldRender) return null
 
   if (fullScreen) {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col bg-white">
+      <div
+        className={`fixed inset-0 z-50 flex flex-col bg-white transition-opacity duration-200 ease-out ${
+          animateIn ? 'opacity-100' : 'opacity-0'
+        }`}
+      >
         <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div className="min-w-0">
             <h3 className="text-lg font-bold text-slate-800 truncate">{title}</h3>
@@ -35,9 +54,6 @@ export const Modal = ({
           </button>
         </div>
 
-        {/* No padding, no scroll here — fullScreen callers own their own
-            internal layout (e.g. a sticky footer + scrollable middle
-            section) and would otherwise fight this wrapper's overflow. */}
         <div className="flex-1 min-h-0">{children}</div>
       </div>
     )
@@ -45,15 +61,17 @@ export const Modal = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm transition-opacity"
+        className={`fixed inset-0 bg-slate-900/50 backdrop-blur-sm transition-opacity duration-200 ease-out ${
+          animateIn ? 'opacity-100' : 'opacity-0'
+        }`}
         onClick={onClose}
       />
 
-      {/* Modal Dialog Frame */}
       <div
-        className={`relative w-full ${maxWidth} bg-white rounded-xl shadow-xl z-10 overflow-hidden border border-slate-100`}
+        className={`relative w-full ${maxWidth} bg-white rounded-xl shadow-xl z-10 overflow-hidden border border-slate-100 transform transition-all duration-200 ease-out ${
+          animateIn ? 'opacity-100 scale-100 translate-y-0' : 'opacity-0 scale-95 translate-y-2'
+        }`}
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
           <div className="min-w-0">

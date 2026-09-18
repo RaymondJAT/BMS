@@ -27,8 +27,9 @@ const emptyItem = () => ({
 // From, To, Transport, Amount, Receipts, Action). No cell may span more
 // than one track here, or the row runs out of tracks and CSS grid wraps
 // the overflow (Action) onto an implicit second row.
-const TRAVEL_GRID_COLS = 'grid-cols-[110px_65px_1.8fr_1.6fr_1.6fr_1.3fr_1.3fr_150px_90px_2fr_45px]'
-const MISC_GRID_COLS = 'grid-cols-[110px_2.5fr_2fr_90px_2fr_45px]'
+const TRAVEL_GRID_COLS =
+  'grid-cols-[110px_65px_1.8fr_1.6fr_1.6fr_1.8fr_1.8fr_150px_90px_140px_45px]'
+const MISC_GRID_COLS = 'grid-cols-[110px_2.5fr_2fr_90px_140px_45px]'
 
 export default function CreateLiquidationModal({
   isOpen,

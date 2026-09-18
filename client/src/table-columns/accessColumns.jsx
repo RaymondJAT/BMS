@@ -34,7 +34,7 @@ export const createAccessColumns = ({ onEdit, onPermissions }) => [
               {name}
             </p>
             <p className="text-[11px] text-slate-500 font-semibold font-mono truncate mt-0.5">
-              ID: #{id}
+              ID: {id}
             </p>
           </div>
         </div>

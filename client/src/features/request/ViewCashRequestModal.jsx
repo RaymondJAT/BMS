@@ -49,7 +49,7 @@ export default function ViewCashRequestModal({
     ],
     [
       'Requester',
-      getEmployeeName ? getEmployeeName(request.employee_id) : `Employee #${request.employee_id}`,
+      getEmployeeName ? getEmployeeName(request.employee_id) : `${request.employee_id}`,
     ],
     [
       'Department',

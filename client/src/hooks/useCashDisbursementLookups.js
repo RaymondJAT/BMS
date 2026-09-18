@@ -69,7 +69,7 @@ export function useCashDisbursementLookups() {
   const getEmployeeName = useCallback(
     (id) => {
       const match = employees.find((e) => String(e.id || e.me_id) === String(id))
-      return match?.fullname || match?.me_fullname || `Employee #${id ?? 'N/A'}`
+      return match?.fullname || match?.me_fullname || `${id ?? 'N/A'}`
     },
     [employees],
   )

@@ -6,28 +6,36 @@ import { masterEmployeeApi } from '../api/masterEmployeeApi'
 import { masterParticularsApi } from '../api/masterParticularsApi'
 import { masterUserApi } from '../api/masterUserApi'
 import { masterProjectApi } from '../api/masterProjectApi'
+import { unwrapSettled, unwrapList } from '../utils/apiResponse'
+import { findDepartmentName, findEmployeeName, findFundLabel } from '../utils/lookupHelpers'
 
-// Strips spaces/punctuation and upper-cases — same normalization as the
-// original shared hook, so "Team Leader" / "TEAM_LEAD" / "team-leader"
-// all match. getMasterUser already joins access_name onto each user row,
-// so no separate role-id lookup is needed.
+const INITIAL_PARTICULARS_LIMIT = 20
+const SEARCH_PARTICULARS_LIMIT = 20
+
+const toParticularOption = (p) => ({
+  value: p.id,
+  label: p.code ? `${p.code} ${p.name || p.description}` : p.name || p.description,
+})
+
+// Strips spaces/punctuation and upper-cases — so "Team Leader" /
+// "TEAM_LEAD" / "team-leader" all match. getMasterUser already joins
+// access_name onto each user row, so no separate role-id lookup needed.
 const normalizeRoleName = (name) =>
   String(name || '')
     .toUpperCase()
     .replace(/[^A-Z]/g, '')
 
 /**
- * Cash Request page's lookup hook. Same fetch pattern as
- * useCashDisbursementLookups, scoped to what the Create/Edit/Approve/
- * Disburse modals and the embedded Liquidate-flow's cash-side lookups
- * actually read: revolvingFunds + budgets (for getFundLabel),
- * departments, employees, particulars (handed to CreateLiquidationModal),
- * projects (for activeProjects), and users (for teamLeads).
+ * Cash Request page's lookup hook. Scoped to what the Create/Edit/
+ * Approve/Disburse modals and the embedded Liquidate flow's cash-side
+ * lookups actually read: revolvingFunds + budgets (for getFundLabel),
+ * departments, employees, particulars (search-on-type — see
+ * searchParticulars, handed to CreateLiquidationModal), projects (for
+ * activeProjects), and users (for teamLeads).
  *
- * accessRoles/routeAccess are deliberately NOT fetched — this page never
- * reads a roles map, so pulling the full Access Role list here would be
- * dead weight. The page's own districts/modes/searchStores still come
- * from useLiquidationMasterData, untouched by this hook.
+ * accessRoles/routeAccess are deliberately NOT fetched — nothing on this
+ * page reads a roles map. districts/modes/searchStores/searchModes still
+ * come from useLiquidationMasterData, untouched by this hook.
  */
 export function useCashRequestLookups() {
   const [revolvingFunds, setRevolvingFunds] = useState([])
@@ -50,27 +58,20 @@ export function useCashRequestLookups() {
           budgetApi.getAll(),
           masterDepartmentApi.getAll(),
           masterEmployeeApi.getAll(),
-          masterParticularsApi.getAll(),
+          masterParticularsApi.getAll({ status: 'ACTIVE', limit: INITIAL_PARTICULARS_LIMIT }),
           masterUserApi.getAll(),
           // Master Project controller isn't wired up yet — fails soft via
-          // Promise.allSettled so the rest of the page still loads, same
-          // guard as the original shared hook.
+          // Promise.allSettled so the rest of the page still loads.
           masterProjectApi?.getAll ? masterProjectApi.getAll() : Promise.resolve([]),
         ])
 
-      const unwrap = (res) => {
-        if (res.status !== 'fulfilled') return []
-        const val = res.value
-        return Array.isArray(val) ? val : val?.data || val?.result || []
-      }
-
-      setRevolvingFunds(unwrap(rfRes))
-      setBudgets(unwrap(budgetRes))
-      setDepartments(unwrap(deptRes))
-      setEmployees(unwrap(empRes))
-      setParticulars(unwrap(partRes))
-      setUsers(unwrap(userRes))
-      setProjects(unwrap(projectRes))
+      setRevolvingFunds(unwrapSettled(rfRes))
+      setBudgets(unwrapSettled(budgetRes))
+      setDepartments(unwrapSettled(deptRes))
+      setEmployees(unwrapSettled(empRes))
+      setParticulars(unwrapSettled(partRes))
+      setUsers(unwrapSettled(userRes))
+      setProjects(unwrapSettled(projectRes))
     } catch (err) {
       console.error('Failed to fetch cash request lookups:', err)
       setError('Failed to load reference data.')
@@ -83,17 +84,28 @@ export function useCashRequestLookups() {
     fetchAll()
   }, [fetchAll])
 
-  // Cash Request "Project" dropdown should only offer ACTIVE projects —
-  // INACTIVE ones drop out of new-request selection. Mirrors the
-  // original shared hook's behavior exactly.
+  const searchParticulars = useCallback(async (term) => {
+    try {
+      const res = await masterParticularsApi.getAll({
+        status: 'ACTIVE',
+        search: term,
+        limit: SEARCH_PARTICULARS_LIMIT,
+      })
+      return unwrapList(res).map(toParticularOption)
+    } catch (err) {
+      console.error('Failed to search particulars:', err)
+      return []
+    }
+  }, [])
+
+  // Cash Request "Project" dropdown should only offer ACTIVE projects.
   const activeProjects = useMemo(
     () => projects.filter((p) => String(p.status).toUpperCase() === 'ACTIVE'),
     [projects],
   )
 
-  // Users with Team Leader access — filters directly against the
-  // already-joined access_name rather than resolving access_id through a
-  // separate roles lookup. Only ACTIVE users are offered as leads.
+  // Users with Team Leader access, filtered directly against the
+  // already-joined access_name. Only ACTIVE users are offered as leads.
   const teamLeads = useMemo(() => {
     return users.filter((u) => {
       if (String(u.status).toUpperCase() !== 'ACTIVE') return false
@@ -101,36 +113,11 @@ export function useCashRequestLookups() {
     })
   }, [users])
 
-  const getDepartmentName = useCallback(
-    (id) => {
-      const match = departments.find((d) => String(d.id || d.md_id) === String(id))
-      return match?.name || match?.md_name || `Department #${id ?? 'N/A'}`
-    },
-    [departments],
-  )
-
-  const getEmployeeName = useCallback(
-    (id) => {
-      const match = employees.find((e) => String(e.id || e.me_id) === String(id))
-      return match?.fullname || match?.me_fullname || `Employee #${id ?? 'N/A'}`
-    },
-    [employees],
-  )
-
+  const getDepartmentName = useCallback((id) => findDepartmentName(departments, id), [departments])
+  const getEmployeeName = useCallback((id) => findEmployeeName(employees, id), [employees])
   const getFundLabel = useCallback(
-    (id) => {
-      const fund = revolvingFunds.find((f) => String(f.id || f.rf_id) === String(id))
-      if (!fund) return 'Unknown Fund'
-
-      const budget = budgets.find(
-        (b) => String(b.id || b.b_id) === String(fund.budget_id || fund.rf_budget_id),
-      )
-      if (!budget) return 'Unknown Fund'
-
-      const deptName = getDepartmentName(budget.department_id || budget.b_department_id)
-      return budget.type ? `${deptName} — ${budget.type}` : deptName
-    },
-    [revolvingFunds, budgets, getDepartmentName],
+    (id) => findFundLabel(revolvingFunds, budgets, departments, id),
+    [revolvingFunds, budgets, departments],
   )
 
   return {
@@ -146,6 +133,7 @@ export function useCashRequestLookups() {
     isLoading,
     error,
     refetch: fetchAll,
+    searchParticulars,
     getDepartmentName,
     getEmployeeName,
     getFundLabel,

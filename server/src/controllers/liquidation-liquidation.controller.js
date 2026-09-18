@@ -1335,7 +1335,8 @@ const getLiquidationDetail = async (req, res) => {
          cr.cr_reference_id AS cash_request_reference_id,
          cr.cr_employee_id AS employee_id,
          cr.cr_department_id AS department_id,
-         cr.cr_project AS project
+         cr.cr_project AS project,
+         cr.cr_team_lead AS team_lead
        FROM liquidation l
        INNER JOIN cash_request cr ON cr.cr_id = l.l_cash_request_id
        WHERE l.l_id = ?`,

@@ -9,7 +9,7 @@ const formatCurrency = (val) =>
  * same "factory function that takes the lookups it needs" shape, kept out
  * of the page component so the page stays focused on layout.
  */
-export function createLiquidationItemColumns({ getParticularsName, getModeName }) {
+export function createLiquidationItemColumns({ getParticularsName, getModeName, getStoreLabel }) {
   return [
     {
       header: 'DATE',
@@ -24,7 +24,7 @@ export function createLiquidationItemColumns({ getParticularsName, getModeName }
     {
       header: 'STORE NAME',
       accessorKey: 'store_name',
-      cell: (row) => row.store_name || '—',
+      cell: (row) => (getStoreLabel ? getStoreLabel(row.store_name) : row.store_name || '—'),
     },
     {
       header: 'PURPOSE',
@@ -40,12 +40,12 @@ export function createLiquidationItemColumns({ getParticularsName, getModeName }
     {
       header: 'FROM',
       accessorKey: 'from',
-      cell: (row) => row.from || '—',
+      cell: (row) => (getStoreLabel ? getStoreLabel(row.from) : row.from || '—'),
     },
     {
       header: 'TO',
       accessorKey: 'to',
-      cell: (row) => row.to || '—',
+      cell: (row) => (getStoreLabel ? getStoreLabel(row.to) : row.to || '—'),
     },
     {
       header: 'TRANSPORT MODE',

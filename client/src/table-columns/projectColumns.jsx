@@ -30,7 +30,7 @@ export const createProjectColumns = ({ onEdit }) => [
           <div className="min-w-0 flex-1">
             <p className="font-bold text-slate-900 text-xs tracking-tight truncate">{name}</p>
             <p className="text-[11px] text-slate-500 font-semibold font-mono truncate mt-0.5">
-              #{id ?? 'N/A'}
+              ID: {id}
             </p>
           </div>
         </div>

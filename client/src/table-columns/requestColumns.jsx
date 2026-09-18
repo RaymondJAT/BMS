@@ -57,7 +57,7 @@ export function createRequestColumns({
       const resolved = getEmployeeName(row.employee_id)
       if (resolved && resolved !== 'N/A') return resolved
     }
-    return `Employee #${row.employee_id ?? 'N/A'}`
+    return `${row.employee_id ?? 'N/A'}`
   }
 
   const resolveDepartment = (row) => {

@@ -107,9 +107,7 @@ export default function ApproveCashRequestModal({
               Requester
             </div>
             <div className="font-semibold text-slate-800">
-              {getEmployeeName
-                ? getEmployeeName(request.employee_id)
-                : `Employee #${request.employee_id}`}
+              {getEmployeeName ? getEmployeeName(request.employee_id) : `${request.employee_id}`}
             </div>
           </div>
           <div>

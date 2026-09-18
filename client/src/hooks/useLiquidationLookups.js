@@ -4,21 +4,33 @@ import { budgetApi } from '../api/budgetApi'
 import { masterDepartmentApi } from '../api/masterDepartmentApi'
 import { masterEmployeeApi } from '../api/masterEmployeeApi'
 import { masterParticularsApi } from '../api/masterParticularsApi'
+import { unwrapSettled, unwrapList } from '../utils/apiResponse'
+import { findDepartmentName, findEmployeeName, findFundLabel } from '../utils/lookupHelpers'
+
+// Same search-on-type pattern as useLiquidationMasterData's Store field —
+// a small initial ACTIVE batch, then a fresh server search per call via
+// searchParticulars, instead of loading and client-filtering the whole
+// master_particulars table.
+const INITIAL_PARTICULARS_LIMIT = 20
+const SEARCH_PARTICULARS_LIMIT = 20
+
+const toParticularOption = (p) => ({
+  value: p.id,
+  label: p.code ? `${p.code} ${p.name || p.description}` : p.name || p.description,
+})
 
 /**
  * Liquidation page's lookup hook. Scoped to what the Liquidation list +
- * Edit/Approve/Verify/Finance modals actually read from the old shared
- * hook: particulars (each liquidation line's Particulars dropdown),
- * employees + getEmployeeName, and revolvingFunds + budgets +
- * departments purely so getFundLabel can resolve a disbursement's
- * originating fund to a display name.
+ * Edit/Approve/Verify/Finance modals actually read: particulars
+ * (search-on-type — see searchParticulars), employees + getEmployeeName,
+ * and revolvingFunds + budgets + departments purely so getFundLabel can
+ * resolve a disbursement's originating fund to a display name.
  *
- * Deliberately does NOT duplicate what the page already fetches via its
- * own dedicated hooks, left untouched: useLiquidationMasterData
- * (districts/modes/searchStores — Store/Transport fields on each line),
- * useCashDisbursements (disbursement rows, for the Verify modal's fund
- * picker), and useRevolvingFunds (full fund list with status, same
- * picker).
+ * Deliberately does NOT duplicate what the page fetches via its own
+ * dedicated hooks, left untouched: useLiquidationMasterData
+ * (districts/modes/searchStores/searchModes), useCashDisbursements
+ * (disbursement rows, for the Verify modal's fund picker), and
+ * useRevolvingFunds (full fund list with status, same picker).
  */
 export function useLiquidationLookups() {
   const [revolvingFunds, setRevolvingFunds] = useState([])
@@ -38,20 +50,14 @@ export function useLiquidationLookups() {
         budgetApi.getAll(),
         masterDepartmentApi.getAll(),
         masterEmployeeApi.getAll(),
-        masterParticularsApi.getAll(),
+        masterParticularsApi.getAll({ status: 'ACTIVE', limit: INITIAL_PARTICULARS_LIMIT }),
       ])
 
-      const unwrap = (res) => {
-        if (res.status !== 'fulfilled') return []
-        const val = res.value
-        return Array.isArray(val) ? val : val?.data || val?.result || []
-      }
-
-      setRevolvingFunds(unwrap(rfRes))
-      setBudgets(unwrap(budgetRes))
-      setDepartments(unwrap(deptRes))
-      setEmployees(unwrap(empRes))
-      setParticulars(unwrap(partRes))
+      setRevolvingFunds(unwrapSettled(rfRes))
+      setBudgets(unwrapSettled(budgetRes))
+      setDepartments(unwrapSettled(deptRes))
+      setEmployees(unwrapSettled(empRes))
+      setParticulars(unwrapSettled(partRes))
     } catch (err) {
       console.error('Failed to fetch liquidation lookups:', err)
       setError('Failed to load reference data.')
@@ -64,36 +70,25 @@ export function useLiquidationLookups() {
     fetchAll()
   }, [fetchAll])
 
-  const getDepartmentName = useCallback(
-    (id) => {
-      const match = departments.find((d) => String(d.id || d.md_id) === String(id))
-      return match?.name || match?.md_name || `Department #${id ?? 'N/A'}`
-    },
-    [departments],
-  )
+  const searchParticulars = useCallback(async (term) => {
+    try {
+      const res = await masterParticularsApi.getAll({
+        status: 'ACTIVE',
+        search: term,
+        limit: SEARCH_PARTICULARS_LIMIT,
+      })
+      return unwrapList(res).map(toParticularOption)
+    } catch (err) {
+      console.error('Failed to search particulars:', err)
+      return []
+    }
+  }, [])
 
-  const getEmployeeName = useCallback(
-    (id) => {
-      const match = employees.find((e) => String(e.id || e.me_id) === String(id))
-      return match?.fullname || match?.me_fullname || `Employee #${id ?? 'N/A'}`
-    },
-    [employees],
-  )
-
+  const getDepartmentName = useCallback((id) => findDepartmentName(departments, id), [departments])
+  const getEmployeeName = useCallback((id) => findEmployeeName(employees, id), [employees])
   const getFundLabel = useCallback(
-    (id) => {
-      const fund = revolvingFunds.find((f) => String(f.id || f.rf_id) === String(id))
-      if (!fund) return 'Unknown Fund'
-
-      const budget = budgets.find(
-        (b) => String(b.id || b.b_id) === String(fund.budget_id || fund.rf_budget_id),
-      )
-      if (!budget) return 'Unknown Fund'
-
-      const deptName = getDepartmentName(budget.department_id || budget.b_department_id)
-      return budget.type ? `${deptName} — ${budget.type}` : deptName
-    },
-    [revolvingFunds, budgets, getDepartmentName],
+    (id) => findFundLabel(revolvingFunds, budgets, departments, id),
+    [revolvingFunds, budgets, departments],
   )
 
   return {
@@ -105,6 +100,7 @@ export function useLiquidationLookups() {
     isLoading,
     error,
     refetch: fetchAll,
+    searchParticulars,
     getDepartmentName,
     getEmployeeName,
     getFundLabel,

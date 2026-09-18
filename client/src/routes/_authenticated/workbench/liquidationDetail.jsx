@@ -3,7 +3,7 @@ import { useMemo } from 'react'
 import { Image } from 'antd'
 import { ArrowLeft, Printer, Loader2 } from 'lucide-react'
 import DataTable from '../../../components/ui/DataTable'
-import { useLiquidationMasterData } from '../../../hooks/useLiquidationMasterData'
+import { useLiquidationDetailLookups } from '../../../hooks/useLiquidationDetailLookups'
 import { useCashDisbursementLookups } from '../../../hooks/useCashDisbursementLookups'
 import { useLiquidationDetail } from '../../../hooks/useLiquidationDetail'
 import { createLiquidationItemColumns } from '../../../table-columns/liquidationItemColumns'
@@ -31,10 +31,6 @@ const formatDate = (val) => {
     : d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 }
 
-// One field in the header summary grid — label on top, value below. The
-// 8 fields below were previously 8 copy-pasted divs; this mirrors the
-// fields.map(...) pattern ViewCashRequestModal already uses for the same
-// kind of label/value grid.
 function SummaryField({ label, value, valueClassName = 'font-semibold text-slate-800' }) {
   return (
     <div>
@@ -49,14 +45,17 @@ function LiquidationDetailPage() {
   const navigate = useNavigate()
 
   const { liquidation, activity, isLoading, error } = useLiquidationDetail(id)
-  const { getModeName } = useLiquidationMasterData()
-  const { getEmployeeName, getParticularsName, getDepartmentName } = useCashDisbursementLookups()
+
+  const { getEmployeeName, getDepartmentName } = useCashDisbursementLookups()
+  const { getParticularsName, getModeName, getStoreLabel } = useLiquidationDetailLookups(
+    liquidation?.items,
+  )
 
   const rejectionNotes = useMemo(() => activity.filter((a) => a.action === 'REJECTED'), [activity])
 
   const itemColumns = useMemo(
-    () => createLiquidationItemColumns({ getParticularsName, getModeName }),
-    [getParticularsName, getModeName],
+    () => createLiquidationItemColumns({ getParticularsName, getModeName, getStoreLabel }),
+    [getParticularsName, getModeName, getStoreLabel],
   )
 
   if (isLoading) {
