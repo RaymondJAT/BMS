@@ -90,7 +90,7 @@ export function useLiquidationMasterData() {
   // is only ever a small batch now, not the full table, so an id from
   // outside that batch is expected — falls back to a placeholder.
   const getModeName = useCallback(
-    (id) => modes.find((m) => String(m.id) === String(id))?.name || `Mode #${id ?? 'N/A'}`,
+    (id) => (id ? modes.find((m) => String(m.id) === String(id))?.name || '—' : '—'),
     [modes],
   )
 

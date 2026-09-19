@@ -3,7 +3,7 @@ import {
   Pencil,
   CheckCircle2,
   Banknote,
-  ReceiptText, // Replaced Receipt with ReceiptText (no dollar sign)
+  ReceiptText,
   User,
   Building,
   Calendar,
@@ -167,17 +167,11 @@ export function createRequestColumns({
       cell: (row) => {
         const status = String(row.status || '').toUpperCase()
         const style = STATUS_STYLES[status] || 'bg-slate-100 text-slate-600 border-slate-200'
-        const label =
-          status === 'PENDING'
-            ? 'PENDING TEAM LEADER'
-            : status === 'APPROVED'
-              ? 'PENDING FUND CUSTODIAN'
-              : status
         return (
           <span
             className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${style}`}
           >
-            {label || 'UNKNOWN'}
+            {status || 'UNKNOWN'}
           </span>
         )
       },

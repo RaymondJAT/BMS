@@ -89,7 +89,7 @@ export function useLiquidationDetailLookups(items = []) {
   )
 
   const getModeName = useCallback(
-    (id) => modes.find((m) => String(m.id) === String(id))?.name || `Mode #${id ?? 'N/A'}`,
+    (id) => (id ? modes.find((m) => String(m.id) === String(id))?.name || '—' : '—'),
     [modes],
   )
 

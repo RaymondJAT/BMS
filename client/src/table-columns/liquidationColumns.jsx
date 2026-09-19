@@ -1,4 +1,4 @@
-import { Download, Pencil, CheckCircle2, ShieldCheck, ClipboardCheck } from 'lucide-react'
+import { Download } from 'lucide-react'
 
 const formatCurrency = (val) =>
   `₱${parseFloat(val || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -11,24 +11,16 @@ const STATUS_STYLES = {
   INCOMPLETE: 'bg-orange-50 text-orange-700 border-orange-200',
   REJECTED: 'bg-rose-50 text-rose-700 border-rose-200',
 }
-const EDITABLE_STATUSES = ['PENDING', 'REJECTED', 'INCOMPLETE']
 
-export function createLiquidationColumns({
-  userRole,
-  currentEmployeeId,
-  onDownload,
-  onEdit,
-  onApprove,
-  onVerify,
-  onFinanceReview,
-  getEmployeeName,
-}) {
-  const hasFullAccess = !userRole || userRole === 'ADMINISTRATOR'
-  const canApprove = hasFullAccess || ['TEAM_LEAD', 'ADMIN'].includes(userRole)
-  const canVerify = hasFullAccess || ['FUND_CUSTODIAN', 'ADMIN'].includes(userRole)
-  const canFinance = hasFullAccess || ['FINANCE', 'ADMIN'].includes(userRole)
-  const canActAsRequester = hasFullAccess || userRole === 'REQUESTER'
-
+/**
+ * Liquidation list columns. Deliberately read-only besides Download —
+ * Edit, Team Leader Approve/Reject, Fund Custodian Verify/Reject, and
+ * Finance post-audit all moved to LiquidationDetailPage, since every one
+ * of those decisions requires checking line items against receipts
+ * first, which only the detail page shows. Clicking a row (onRowClick,
+ * wired by the page) or the reference id navigates there.
+ */
+export function createLiquidationColumns({ onDownload, getEmployeeName }) {
   return [
     {
       header: 'Reference',
@@ -93,90 +85,21 @@ export function createLiquidationColumns({
     {
       header: 'Actions',
       align: 'center',
-      cell: (row) => {
-        const status = String(row.status || '').toUpperCase()
-        const ownsRequest =
-          hasFullAccess ||
-          (canActAsRequester && String(row.employee_id) === String(currentEmployeeId))
-        const canEdit = ownsRequest && EDITABLE_STATUSES.includes(status)
-
-        return (
-          <div className="flex items-center justify-center gap-1">
-            {/* Download Liquidation PDF/Summary */}
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation()
-                onDownload?.(row)
-              }}
-              title="Download Liquidation PDF"
-              className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
-            >
-              <Download className="w-4 h-4" />
-            </button>
-
-            {/* Edit & Resubmit */}
-            {canEdit && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onEdit?.(row)
-                }}
-                title="Edit & Resubmit"
-                className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg cursor-pointer"
-              >
-                <Pencil className="w-4 h-4" />
-              </button>
-            )}
-
-            {/* Team Lead Approve */}
-            {canApprove && status === 'PENDING' && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onApprove?.(row)
-                }}
-                title="Team Leader Approve / Reject"
-                className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg cursor-pointer"
-              >
-                <CheckCircle2 className="w-4 h-4" />
-              </button>
-            )}
-
-            {/* Fund Custodian Verify */}
-            {canVerify && status === 'APPROVED' && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onVerify?.(row)
-                }}
-                title="Fund Custodian Verify / Reject"
-                className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg cursor-pointer"
-              >
-                <ShieldCheck className="w-4 h-4" />
-              </button>
-            )}
-
-            {/* Finance Review */}
-            {canFinance && status === 'VERIFIED' && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  onFinanceReview?.(row)
-                }}
-                title="Finance Post-Audit"
-                className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-lg cursor-pointer"
-              >
-                <ClipboardCheck className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        )
-      },
+      cell: (row) => (
+        <div className="flex items-center justify-center">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onDownload?.(row)
+            }}
+            title="Download Liquidation PDF"
+            className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+        </div>
+      ),
     },
   ]
 }
